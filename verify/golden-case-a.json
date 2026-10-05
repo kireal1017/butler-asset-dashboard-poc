@@ -1,0 +1,19 @@
+{
+  "kaptCode": "A13987303",
+  "kaptName": "하계현대우성",
+  "dong": "112",
+  "ho": "1001",
+  "dongOwnerAptSeq": "11350-75",
+  "area": 84.91,
+  "floor": 10,
+  "acquisitionYm": "201610",
+  "expectedTrade": {
+    "aptSeq": "11350-75",
+    "aptNm": "우성",
+    "dealYmd": "20160721",
+    "floor": "10",
+    "excluUseAr": "84.91",
+    "dealAmount": 43000,
+    "aptDong": null
+  }
+}

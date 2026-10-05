@@ -1,0 +1,7 @@
+.env
+server/data/
+node_modules/
+.omc/
+verify/out/
+dist/
+*.log
