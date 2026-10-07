@@ -108,6 +108,18 @@ describe('collector', () => {
     expect(api.calls).toHaveLength(2);
   });
 
+  it('force mode refetches every given month even when fresh (v3 새로고침)', async () => {
+    const db = openDb(':memory:');
+    const api = fakeApi(pages);
+    const col = createCollector({ db, api });
+    await col.ensure('11350', ['201609', '201610']);
+    await col.ensure('11350', ['201609', '201610'], { mode: 'stale' });
+    expect(api.calls).toHaveLength(2);
+    await col.ensure('11350', ['201609', '201610'], { mode: 'force', jobId: 'r' });
+    expect(api.calls).toHaveLength(4);
+    expect(col.progress('r')).toMatchObject({ total: 2, done: 2, running: false });
+  });
+
   it('reports failures in progress and rejects', async () => {
     const db = openDb(':memory:');
     const api = { request: async () => { throw new Error('down'); } };

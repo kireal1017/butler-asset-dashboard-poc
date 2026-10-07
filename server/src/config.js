@@ -26,12 +26,17 @@ export function loadConfig(overrides = {}) {
   const devFault = devFaultArg ? devFaultArg.split('=')[1] : null;
   if (devFault && !['quota', 'fetch'].includes(devFault)) throw new Error(`unknown --dev-fault=${devFault}`);
   if (devFault && asOf) throw new Error('--dev-fault cannot be combined with AS_OF');
+  // v3: 계약 상태(D-n, 120일)는 날짜 기준 TODAY(YYYY-MM-DD), 시세 기간은 월 기준 AS_OF. 검증은 둘 다 고정해서 돈다.
+  const today = env('TODAY') || null;
+  if (today && !/^\d{4}-\d{2}-\d{2}$/.test(today)) throw new Error('TODAY must be YYYY-MM-DD');
+  if (asOf && !today) console.warn('[config] AS_OF만 지정되어 계약 상태는 실제 오늘 날짜로 계산합니다. 검증할 때는 TODAY도 지정하세요.');
   return {
     serviceKey: env('DATA_GO_KR_SERVICE_KEY'),
     // %LOCALAPPDATA%는 Windows 패키지 앱(MSIX)이 띄운 프로세스와 일반 프로세스에서 서로 다른 실제 폴더로 보일 수 있다.
     // DB 파일과 WAL이 다른 계층에 나뉘면 손상되므로, 가상화되지 않는 홈 폴더를 기본값으로 쓴다.
     dbPath: env('DB_PATH') || path.join(os.homedir(), '.butler-poc', 'app.db'),
     asOf,
+    today,
     port: Number(env('API_PORT') || 3001),
     devFault,
     ...overrides,

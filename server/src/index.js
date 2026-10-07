@@ -15,7 +15,8 @@ if (!config.serviceKey) {
 const db = openDb(config.dbPath);
 const api = createApiClient({ db, serviceKey: config.serviceKey, devFault: config.devFault });
 const collector = createCollector({ db, api });
-const ctx = { db, api, collector, config, asOf: () => config.asOf ?? kstYm(new Date()) };
+const kstDate = (d) => new Date(d.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+const ctx = { db, api, collector, config, asOf: () => config.asOf ?? kstYm(new Date()), today: () => config.today ?? kstDate(new Date()) };
 
 if (countComplexes(db) === 0) {
   try {

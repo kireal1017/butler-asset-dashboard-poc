@@ -1,0 +1,23 @@
+// v3 공통 컴포넌트 (docs/DESIGN-mobile.md). tokens-v3.css 변수만 쓰고 base.css 전역 클래스에 기대지 않는다.
+export { default as AddCard } from './AddCard.vue';
+export { default as AppHeader } from './AppHeader.vue';
+export { default as BottomSheet } from './BottomSheet.vue';
+export { default as Button } from './Button.vue';
+export { default as Card } from './Card.vue';
+export { default as ChangeText } from './ChangeText.vue';
+export { default as EmptyState } from './EmptyState.vue';
+export { default as FilterChips } from './FilterChips.vue';
+export { default as FormButtons } from './FormButtons.vue';
+export { default as FormCard } from './FormCard.vue';
+export { default as FormField } from './FormField.vue';
+export { default as InfoRow } from './InfoRow.vue';
+export { default as MenuRow } from './MenuRow.vue';
+export { default as ModeToggle } from './ModeToggle.vue';
+export { default as Money } from './Money.vue';
+export { default as NoticeBox } from './NoticeBox.vue';
+export { default as StatTiles } from './StatTiles.vue';
+export { default as StatusBadge } from './StatusBadge.vue';
+export { default as StepIndicator } from './StepIndicator.vue';
+export { default as SummaryCard } from './SummaryCard.vue';
+export { default as TextInput } from './TextInput.vue';
+export * from './format.js';

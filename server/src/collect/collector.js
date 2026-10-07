@@ -39,10 +39,10 @@ export function createCollector({ db, api, now = () => new Date() }) {
 
   /**
    * months 중 필요한 달을 수집한다.
-   * mode 'missing' — fetch_log에 없는 달만, 'stale' — 없거나 30일 지난 달.
+   * mode 'missing' — fetch_log에 없는 달만, 'stale' — 없거나 30일 지난 달, 'force' — 모두 다시(v3 새로고침).
    */
   async function ensure(sgg, months, { jobId = null, mode = 'missing' } = {}) {
-    const need = months.filter((ym) => (mode === 'stale' ? isStale(sgg, ym) : isMissing(sgg, ym)));
+    const need = mode === 'force' ? [...months] : months.filter((ym) => (mode === 'stale' ? isStale(sgg, ym) : isMissing(sgg, ym)));
     const job = { total: need.length, done: 0, failed: 0, error: null, running: true };
     if (jobId) jobs.set(jobId, job);
     const results = await Promise.allSettled(need.map((ym) => enqueue(sgg, ym).then(() => { job.done++; }, (e) => {

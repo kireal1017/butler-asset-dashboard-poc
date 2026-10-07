@@ -1,9 +1,8 @@
-// AC-V1 독립 재계산. 앱 코드(server/, client/)를 import하지 않는다 (verify/check-imports.mjs가 강제).
+// 독립 재계산 (v3). 앱 코드(server/, client/)를 import하지 않는다 (verify/check-imports.mjs가 강제).
 // 1) 저장된 원본 응답(raw_responses)을 이 파일의 파서로 다시 읽어 trades·fetch_log와 대조한다.
-// 2) PRD 7장 문장대로 현재가·증감·최근 거래·월별 시계열을 다시 계산해 서버 API 응답과 비교한다.
-// 3) --dom <file>: 화면에서 추출한 값(verify/dom-extract.js 결과)과도 비교한다.
-// 4) 개선 v2 비교 근거 3섹션(같은 층·같은 단지·같은 법정동)을 명세 문장대로 다시 계산해 API·화면과 비교한다.
-// 사용: node verify/recompute.mjs [--api http://localhost:3001] [--dom verify/out/dom.json]
+// 2) 호실마다 참고가·기준일·건수, 기간 평균(1·3·6개월), 가격 범위·위치 막대, 최근 거래, 매입가 대비,
+//    비교 3가지, 매입가 제안을 명세 문장대로 다시 계산해 서버 API 응답과 비교한다(기준 월 AS_OF).
+// 사용: node verify/recompute.mjs [--api http://localhost:3001]
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,7 +15,6 @@ const arg = (name, dflt) => {
   return i > 0 ? process.argv[i + 1] : dflt;
 };
 const API = arg('--api', 'http://localhost:3001');
-const DOM_FILE = arg('--dom', null);
 
 function envValue(name) {
   if (process.env[name]) return process.env[name];
@@ -339,129 +337,131 @@ function domComparisons(exp, asset) {
   };
 }
 
-// ---------- API 비교 ----------
-const get = async (p) => {
-  const r = await fetch(`${API}${p}`);
+// ---------- v3 매매 시세 재구현 (docs/butler-poc-improvement-spec.md 7.3·7.4·7.7, 기준 월 AS_OF) ----------
+// 참고가: 같은 범위·기준 월 포함 최근 12개월 안의 마지막 거래. 기간 평균: 1·3·6개월, 만원 단위 반올림.
+// 가격 위치 막대: min(매입가, 참고가, 최저)~max(…), 양끝 5% 여유. 매입가 제안: 취득 월 → 이전 3개월 → 6개월.
+function windowTrades(list, from, to) {
+  return list.filter((t) => t.ym >= from && t.ym <= to);
+}
+const avgWon = (list) => (list.length ? Math.round(list.reduce((s, t) => s + t.amount, 0) / list.length) * 10000 : null);
+function expectedBar(range, purchase, reference) {
+  if (!range.count) return { hidden: true };
+  const vals = [range.min, range.max, purchase, reference].filter((v) => typeof v === 'number');
+  const lo0 = Math.min(...vals);
+  const hi0 = Math.max(...vals);
+  const pad = (hi0 - lo0 || hi0 || 1) / 20;
+  const lo = lo0 - pad;
+  const hi = hi0 + pad;
+  const at = (v) => (typeof v === 'number' ? (v - lo) / (hi - lo) : null);
+  return {
+    hidden: false, lo, hi,
+    single: range.count === 1 ? at(range.min) : null,
+    band: range.count > 1 ? { from: at(range.min), to: at(range.max) } : null,
+    purchase: at(purchase), reference: at(reference),
+  };
+}
+const close = (a, b) => JSON.stringify(a, (k, v) => (typeof v === 'number' ? Math.round(v * 1e9) / 1e9 : v))
+  === JSON.stringify(b, (k, v) => (typeof v === 'number' ? Math.round(v * 1e9) / 1e9 : v));
+
+// ---------- API 비교 (v3: 건물 → 호실) ----------
+const get = async (p, init) => {
+  const r = await fetch(`${API}${p}`, init);
   return { status: r.status, body: await r.json() };
 };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 const health = (await get('/api/health')).body;
 if (health.devFault) fail('health', `결함 주입이 켜져 있습니다 (${health.devFault})`);
-const list = (await get('/api/assets')).body;
 const AS_OF = envValue('AS_OF') || health.asOf;
 if (AS_OF !== health.asOf) fail('asOf', `env AS_OF ${AS_OF} ≠ server ${health.asOf}`);
-const assetRow = db.prepare('SELECT a.*, c.sigungu_code, c.bjd_code, c.bonbun, c.bubun, c.umd_name FROM assets a JOIN complexes c USING (kapt_code) WHERE a.id = ?');
-const summary = { assets: 0, seriesChecked: 0, seriesSkipped: [], comparisonsChecked: 0, domChecked: 0, scopeChecked: 0, scopeTrustedSharedLot: [] };
-const expectedForDom = {};
 
-for (const item of list.items) {
-  summary.assets++;
-  const w = `asset ${item.id}`;
-  const detail = (await get(`/api/assets/${item.id}`)).body;
-  const asset = assetRow.get(item.id);
-  const sgg = asset.sigungu_code;
-  const ind = independentScope(asset);
-  const apiScope = [...detail.scope.aptSeqs].sort();
-  let scope = ind.seqs;
-  if (ind.shared) {
-    summary.scopeTrustedSharedLot.push(item.id);
-    if (!apiScope.every((s) => ind.seqs.includes(s))) fail(w, `scope ${apiScope} not within lot ${ind.seqs}`);
-    scope = apiScope;
-  } else {
-    summary.scopeChecked++;
-    if (!same(apiScope, ind.seqs)) fail(w, `scope expected ${ind.seqs} got ${apiScope}`);
-  }
-  if (item.areaU !== asset.area_u) fail(w, `area api ${item.areaU} ≠ db ${asset.area_u}`);
-  const trades = comparable(sgg, scope, asset.area_u);
-  const last = trades[trades.length - 1];
-  const expCurrent = last ? { amount: last.amount, ym: last.ym, day: last.day, direct: last.direct } : null;
-  const gotCurrent = item.current ? { amount: item.current.amount, ym: item.current.ym, day: item.current.day, direct: item.current.direct } : null;
-  if (!same(expCurrent, gotCurrent)) fail(w, `current expected ${JSON.stringify(expCurrent)} got ${JSON.stringify(gotCurrent)}`);
-  const expChange = expectedChange(trades, asset.purchase_price ?? null);
-  if (!same(expChange, item.change)) fail(w, `change expected ${JSON.stringify(expChange)} got ${JSON.stringify(item.change)}`);
-  const expRecent = trades.slice(-5).reverse().map((t) => [t.ym, t.day, t.floor, t.amount]);
-  const gotRecent = detail.recentTrades.map((t) => [t.ym, t.day, t.floor, t.amount]);
-  if (!same(expRecent, gotRecent)) fail(w, `recent expected ${JSON.stringify(expRecent)} got ${JSON.stringify(gotRecent)}`);
+const unitStmt = db.prepare(`SELECT u.*, b.kapt_code, h.acquisition_ym, h.purchase_price, c.sigungu_code, c.bjd_code, c.bonbun, c.bubun, c.umd_name
+  FROM units u JOIN buildings b ON b.id = u.building_id JOIN unit_holdings h ON h.unit_id = u.id JOIN complexes c ON c.kapt_code = b.kapt_code
+  WHERE u.id = ?`);
+const fetched = new Set(db.prepare('SELECT sgg_cd || \'|\' || deal_ym AS k FROM fetch_log').all().map((r) => r.k));
+const summary = {
+  buildings: 0, units: 0, scopeChecked: 0, scopeTrustedSharedLot: [], valueChecked: 0, referenceChecked: 0,
+  comparisonsChecked: 0, comparisonsSkipped: [], suggestionsChecked: 0, suggestionsSkipped: [],
+};
 
-  const expRanges = ['1y', '3y', '5y', '10y', ...(asset.purchase_price ? ['hold'] : [])];
-  if (!same(expRanges, detail.ranges)) fail(w, `ranges expected ${expRanges} got ${detail.ranges}`);
-  const series = {};
-  for (const range of expRanges) {
-    const r = await get(`/api/assets/${item.id}/series?range=${range}&collect=0`);
-    if (r.status === 409) { summary.seriesSkipped.push(`${item.id}:${range}`); continue; }
-    const from = independentFrom(range, AS_OF, asset);
-    if (r.body.from !== from || r.body.to !== AS_OF) fail(`${w} ${range}`, `range expected ${from}~${AS_OF} got ${r.body.from}~${r.body.to}`);
-    const exp = expectedSeries(trades, from, AS_OF);
-    const got = r.body.points.map((p) => ({ ym: p.ym, value: p.value, trade: p.trade ? p.trade.amount : null }));
-    summary.seriesChecked++;
-    if (!same(exp, got)) {
-      const i = exp.findIndex((e, k) => !same(e, got[k]));
-      fail(`${w} ${range}`, `series differs at ${i}: expected ${JSON.stringify(exp[i])} got ${JSON.stringify(got[i])}`);
+const list = (await get('/api/buildings')).body;
+for (const b of list.items) {
+  summary.buildings++;
+  const detail = (await get(`/api/buildings/${b.id}`)).body;
+  if (detail.units.length !== b.unitCount) fail(`building ${b.id}`, `unitCount ${b.unitCount} ≠ units ${detail.units.length}`);
+  for (const u of detail.units) {
+    summary.units++;
+    const w = `unit ${u.id}`;
+    const row = unitStmt.get(u.id);
+    const asset = { ...row }; // independentScope·expectedComparisons가 쓰는 필드: kapt_code, bjd_code, sigungu_code, bonbun, bubun, dong, area_u, floor
+    const ind = independentScope(asset);
+    let scope = ind.seqs;
+    if (ind.shared) summary.scopeTrustedSharedLot.push(u.id);
+    else summary.scopeChecked++;
+    const trades = comparable(row.sigungu_code, scope, row.area_u);
+    const w12 = windowTrades(trades, addMonthsYm(AS_OF, -11), AS_OF);
+    const last = w12[w12.length - 1] ?? null;
+
+    // 매매 시세 카드
+    const v = (await get(`/api/units/${u.id}/value`)).body;
+    if (v.status !== 'ready') { fail(w, `value status ${v.status}`); continue; }
+    summary.valueChecked++;
+    const expRef = last ? { value: last.amount * 10000, referenceDate: `${last.ym}${String(last.day).padStart(2, '0')}`, count: w12.length } : { value: null, referenceDate: null, count: 0 };
+    // 저장된 참고가는 기록 시점의 계산이다. 기준 월이 같고 데이터가 그대로면 지금 다시 계산한 값과 같아야 한다.
+    if (v.reference && v.reference.asOf === AS_OF) {
+      summary.referenceChecked++;
+      const got = { value: v.reference.value, referenceDate: v.reference.referenceDate, count: v.reference.count };
+      if (!same(expRef, got)) fail(`${w} reference`, `expected ${JSON.stringify(expRef)} got ${JSON.stringify(got)}`);
     }
-    series[range] = exp;
-  }
-
-  const cmp = await get(`/api/assets/${item.id}/comparisons`);
-  let expCompare = null;
-  const KEYS = ['sameFloor', 'sameComplex', 'neighborhood'];
-  if (cmp.status !== 200) fail(`${w} comparisons`, `status ${cmp.status}`);
-  else if (KEYS.some((k) => cmp.body[k].status !== 'ready')) {
-    fail(`${w} comparisons`, `not ready: ${KEYS.map((k) => cmp.body[k].status)}`);
-  } else {
-    const exp = expectedComparisons(asset, scope, AS_OF);
-    const got = apiComparisons(cmp.body);
-    for (const k of KEYS) {
-      summary.comparisonsChecked++;
-      if (!same(exp[k], got[k])) fail(`${w} comparisons.${k}`, `expected ${JSON.stringify(exp[k])} got ${JSON.stringify(got[k])}`);
+    const expAvg = [1, 3, 6].map((m) => {
+      const l = windowTrades(trades, addMonthsYm(AS_OF, -(m - 1)), AS_OF);
+      return { months: m, from: addMonthsYm(AS_OF, -(m - 1)), to: AS_OF, count: l.length, average: avgWon(l) };
+    });
+    if (!same(expAvg, v.periodAverages)) fail(`${w} periodAverages`, `expected ${JSON.stringify(expAvg)} got ${JSON.stringify(v.periodAverages)}`);
+    const amounts = w12.map((t) => t.amount * 10000);
+    const expRange = amounts.length ? { count: amounts.length, min: Math.min(...amounts), max: Math.max(...amounts) } : { count: 0, min: null, max: null };
+    if (!same(expRange, v.range)) fail(`${w} range`, `expected ${JSON.stringify(expRange)} got ${JSON.stringify(v.range)}`);
+    const expBar = expectedBar(expRange, row.purchase_price, v.reference?.value ?? null);
+    if (!close(expBar, v.bar)) fail(`${w} bar`, `expected ${JSON.stringify(expBar)} got ${JSON.stringify(v.bar)}`);
+    const expRecent = w12.slice(-5).reverse().map((t) => [t.ym, t.day, t.floor, t.amount * 10000]);
+    const gotRecent = v.recentTrades.map((t) => [t.ym, t.day, t.floor, t.amount]);
+    if (!same(expRecent, gotRecent)) fail(`${w} recentTrades`, `expected ${JSON.stringify(expRecent)} got ${JSON.stringify(gotRecent)}`);
+    if (v.reference?.value != null) {
+      const diff = v.reference.value - row.purchase_price;
+      const expChange = { diff, rate: pct(diff, row.purchase_price) };
+      if (!same(expChange, v.change)) fail(`${w} change`, `expected ${JSON.stringify(expChange)} got ${JSON.stringify(v.change)}`);
     }
-    if (cmp.body.neighborhood.dong !== asset.umd_name) fail(`${w} comparisons.dong`, `${cmp.body.neighborhood.dong} ≠ ${asset.umd_name}`);
-    expCompare = domComparisons(exp, asset);
-  }
 
-  expectedForDom[item.id] = {
-    compare: expCompare,
-    currentPrice: expCurrent ? won(expCurrent.amount) : null,
-    dealYm: expCurrent ? `${ymText(expCurrent.ym)} 거래` : null,
-    changeAmount: expChange ? signed(expChange.diff) : null,
-    changeRate: expChange ? signedRate(expChange.rate) : null,
-    purchasePrice: asset.purchase_price ? won(asset.purchase_price) : null,
-    recentTrades: trades.slice(-5).reverse().map((t) => `${ymText(t.ym)}|${t.floor}층|${won(t.amount)}`),
-    series,
-  };
-}
+    // 비교 3가지 (기존 규칙 그대로)
+    const cmp = await get(`/api/units/${u.id}/comparisons`);
+    const KEYS = ['sameFloor', 'sameComplex', 'neighborhood'];
+    if (cmp.status !== 200) fail(`${w} comparisons`, `status ${cmp.status}`);
+    else if (KEYS.some((k) => cmp.body[k].status !== 'ready')) summary.comparisonsSkipped.push(`${u.id}:${KEYS.map((k) => cmp.body[k].status).join('/')}`);
+    else {
+      const exp = expectedComparisons(asset, scope, AS_OF);
+      const got = apiComparisons(cmp.body);
+      for (const k of KEYS) {
+        summary.comparisonsChecked++;
+        if (!same(exp[k], got[k])) fail(`${w} comparisons.${k}`, `expected ${JSON.stringify(exp[k])} got ${JSON.stringify(got[k])}`);
+      }
+    }
 
-// ---------- DOM 비교 ----------
-if (DOM_FILE) {
-  const dom = JSON.parse(fs.readFileSync(DOM_FILE, 'utf8'));
-  for (const [id, views] of Object.entries(dom.assets ?? {})) {
-    const exp = expectedForDom[id];
-    if (!exp) { fail(`dom ${id}`, 'API에 없는 자산'); continue; }
-    for (const [where, got] of Object.entries(views)) {
-      for (const k of ['currentPrice', 'dealYm', 'changeAmount', 'changeRate', 'purchasePrice']) {
-        if (got[k] === undefined) continue;
-        summary.domChecked++;
-        if ((got[k] ?? null) !== exp[k]) fail(`dom ${id} ${where}.${k}`, `expected ${JSON.stringify(exp[k])} got ${JSON.stringify(got[k])}`);
+    // 매입가 제안: 필요한 달이 모두 수집돼 있을 때만 확인(재계산이 외부 호출을 일으키지 않게)
+    const acq = row.acquisition_ym;
+    const need = Array.from({ length: 6 }, (_, i) => addMonthsYm(acq, -i));
+    if (need.some((ym) => !fetched.has(`${row.sigungu_code}|${ym}`))) summary.suggestionsSkipped.push(u.id);
+    else {
+      summary.suggestionsChecked++;
+      let exp = null;
+      for (const m of [1, 3, 6]) {
+        const l = windowTrades(trades, addMonthsYm(acq, -(m - 1)), acq);
+        if (l.length) { exp = { months: m, from: addMonthsYm(acq, -(m - 1)), to: acq, count: l.length, average: avgWon(l) }; break; }
       }
-      if (got.recentTrades) {
-        summary.domChecked++;
-        if (!same(got.recentTrades, exp.recentTrades)) fail(`dom ${id} ${where}.recentTrades`, `expected ${JSON.stringify(exp.recentTrades)} got ${JSON.stringify(got.recentTrades)}`);
-      }
-      // 개선 v2 비교 근거: 섹션별 조건·건수·중앙값·목록 문자열
-      for (const [key, sec] of Object.entries(got.compare ?? {})) {
-        const e = exp.compare?.[key];
-        for (const [k, v] of Object.entries(sec)) {
-          summary.domChecked++;
-          if (!same(v ?? null, e?.[k] ?? null)) fail(`dom ${id} ${where}.compare.${key}.${k}`, `expected ${JSON.stringify(e?.[k])} got ${JSON.stringify(v)}`);
-        }
-      }
-      // 그래프 data-series는 [ym, value, trade] 배열의 JSON을 FNV-1a로 요약해 비교한다 (dom-extract.js와 같은 함수)
-      for (const [range, digest] of Object.entries(got.series ?? {})) {
-        summary.domChecked++;
-        const e = (exp.series[range] ?? []).map((p) => [p.ym, p.value, p.trade]);
-        const expDigest = `${e.length}:${fnv1a(JSON.stringify(e))}`;
-        if (digest !== expDigest) fail(`dom ${id} ${where}.series.${range}`, `chart data-series ${digest} ≠ recompute ${expDigest}`);
-      }
+      const s = await get('/api/purchase-suggestion', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ kaptCode: row.kapt_code, dong: row.dong, areaU: row.area_u, acquisitionYm: acq }),
+      });
+      if (!same(exp, s.body.suggestion)) fail(`${w} suggestion`, `expected ${JSON.stringify(exp)} got ${JSON.stringify(s.body.suggestion)}`);
     }
   }
 }
