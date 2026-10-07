@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import ChangeChip from '../components/ChangeChip.vue';
+import ComparisonSections from '../components/ComparisonSections.vue';
 import Disclaimer from '../components/Disclaimer.vue';
 import ProgressBar from '../components/ProgressBar.vue';
 import TrendChart from '../components/TrendChart.vue';
@@ -120,6 +121,8 @@ const purchaseLine = computed(() => {
           :disabled="Boolean(loadingRange)" @click="loadSeries(r)">{{ RANGE_LABEL[r] }}</button>
       </div>
     </section>
+
+    <ComparisonSections :asset-id="id" />
 
     <p v-if="error" class="card body-sm" role="alert">{{ error }}</p>
 

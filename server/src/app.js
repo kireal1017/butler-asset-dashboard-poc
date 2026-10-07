@@ -4,6 +4,7 @@ import { searchComplexes } from './services/complexes.js';
 import { createAsset, deleteAsset, getAssetRow, lookupUnit, startInitialCollection } from './services/assets.js';
 import { assetDetail, assetSeries, listAssets, refreshOnOpen } from './services/valuation.js';
 import { deletePurchase, purchaseCandidates, savePurchase } from './services/purchase.js';
+import { assetComparisons, collectComparisons } from './services/comparisons.js';
 
 const EXTERNAL_CODES = new Set(['QUOTA', 'KEY_NOT_REGISTERED', 'EXTERNAL']);
 
@@ -54,6 +55,16 @@ export function createApp(ctx) {
     if (!getAssetRow(db, id)) throw new HttpError(404, 'NO_ASSET', '자산을 찾을 수 없습니다.');
     const series = req.query.range ? collector.progress(`series:${id}:${req.query.range}`) : null;
     res.json({ progress: series ?? collector.progress(`asset:${id}`) });
+  });
+
+  // 개선 v2 비교 근거: GET은 읽기만, 빠진 달 수집은 POST만 시작한다
+  app.get('/api/assets/:id/comparisons', (req, res) => {
+    res.json(assetComparisons(ctx, Number(req.params.id)));
+  });
+
+  app.post('/api/assets/:id/comparisons/collect', (req, res) => {
+    collectComparisons(ctx, Number(req.params.id));
+    res.status(202).json({ ok: true });
   });
 
   app.post('/api/assets/:id/purchase/candidates', wrap(async (req, res) => {

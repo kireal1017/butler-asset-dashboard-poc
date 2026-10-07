@@ -1,9 +1,14 @@
 <script setup>
-defineProps({ done: { type: Number, default: 0 }, total: { type: Number, default: 0 }, label: { type: String, default: '실거래 자료를 불러오는 중' } });
+defineProps({
+  done: { type: Number, default: 0 },
+  total: { type: Number, default: 0 },
+  label: { type: String, default: '실거래 자료를 불러오는 중' },
+  testid: { type: String, default: 'progress' },
+});
 </script>
 
 <template>
-  <div class="progress stack" role="status" data-testid="progress">
+  <div class="progress stack" role="status" :data-testid="testid">
     <p class="body-sm">{{ label }}<template v-if="total"> ({{ total }}개월 중 {{ done }}개월)</template></p>
     <div class="track"><div class="bar" :style="{ width: total ? `${Math.round((done / total) * 100)}%` : '15%' }" /></div>
   </div>

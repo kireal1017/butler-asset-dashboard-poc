@@ -52,9 +52,11 @@ npm run verify
 npm run scan-secrets
 ```
 
-- `npm test`: 서버 85개, 화면 16개 단위·통합 테스트. 실제 응답 표본은 `server/test/fixtures`에 있습니다.
+- `npm test`: 서버 114개, 화면 17개 단위·통합 테스트. 실제 응답 표본은 `server/test/fixtures`에 있습니다.
 - `npm run verify`: 서버가 떠 있는 상태에서 실행합니다. 저장된 원본 응답을 앱 코드와 독립적으로 다시 계산해 API 값과 비교합니다. 화면 값과도 비교하려면 `node verify/recompute.mjs --dom verify/out/dom.json`을 씁니다(추출 방법은 `verify/dom-extract.js` 머리말).
 - `npm run scan-secrets`: 인증키가 파일, git 이력, 저장된 응답, 로그에 없는지 검사합니다.
+- 개선 v2 회귀 비교: `node verify/regress-prep.mjs --as-of 202610`로 기준 DB 사본 두 개를 만든 뒤, 변경 전 커밋(git worktree)과 변경 후 코드를 각 사본으로 띄우고 `node verify/regress-compare.mjs`로 응답·화면 값·DB 불변을 비교합니다(절차: `docs/verification.md` 10.1).
+- `node verify/e0-measure.mjs`: 비교 근거의 기간·면적 범위별 건수를 실측해 `docs/e0-measure.md`를 만듭니다.
 - `npm run m0`: 하계동 단지 연결 체인을 실제 API로 재현합니다(응답 캐시 사용).
 
 ### 화면 상태 점검용 결함 주입 (개발 전용)

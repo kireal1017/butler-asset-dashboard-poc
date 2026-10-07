@@ -55,6 +55,21 @@
     const d = { ...pick(root), purchasePrice: text(root, 'purchase-price'), series: {} };
     d.recentTrades = [...root.querySelectorAll('[data-testid="recent-trade"]')].map((li) =>
       ['ym', 'floor', 'amount'].map((k) => li.querySelector(`[data-k="${k}"]`).textContent.trim()).join('|'));
+    // 개선 v2 비교 근거: 수집이 끝날 때까지 기다리고, 동네 목록은 "더 보기"를 펼쳐 전부 읽는다
+    // (변경 전 화면에는 비교 근거가 없으므로 건너뛴다 — 회귀 비교에서 같은 추출기를 양쪽에 쓴다)
+    if (root.querySelector('[data-testid="comparisons"]')) {
+      await waitFor(() => root.querySelectorAll('[data-compare]').length === 3 && !root.querySelector('[data-testid="compare-progress"]'), 600000);
+    }
+    const more = root.querySelector('[data-testid="compare-more"]');
+    if (more && more.getAttribute('aria-expanded') !== 'true') { more.click(); await sleep(200); }
+    if (root.querySelectorAll('[data-compare]').length) d.compare = {};
+    for (const sec of root.querySelectorAll('[data-compare]')) {
+      const v = (k) => sec.querySelector(`[data-v="${k}"]`)?.textContent.trim() ?? null;
+      const o = { cond: v('cond'), count: v('count'), rows: [...sec.querySelectorAll('[data-row]')].map((li) => [...li.querySelectorAll('[data-k]')].map((e) => e.textContent.trim()).join('|')) };
+      if (sec.dataset.compare !== 'sameFloor') o.median = v('median');
+      if (sec.dataset.compare === 'neighborhood') o.complexes = v('complexes');
+      d.compare[sec.dataset.compare] = o;
+    }
     for (const tab of root.querySelectorAll('[role="tab"][data-range]')) {
       tab.click();
       await sleep(300);

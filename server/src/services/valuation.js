@@ -63,13 +63,16 @@ export function assetSummary(ctx, a) {
   };
 }
 
+// 늦게 들어오는 해제 신고(14%가 계약 90일 이후, docs/data-quality.md)를 잡기 위해 3개월에서 12개월로 넓혔다.
+export const REFRESH_MONTHS = 12;
+
 /**
- * 앱 재진입 시 재수집 (PRD 7.8): 자산이 있는 시군구마다 최근 3개월 중 없거나 30일 지난 달,
+ * 앱 재진입 시 재수집 (PRD 7.8, 개선 v2 4.3): 자산이 있는 시군구마다 최근 12개월 중 없거나 30일 지난 달,
  * 그리고 등록 시 수집 범위에서 빠진 달(예: 서버 재시작으로 중단). 큐가 (시군구, 월)로 중복을 막는다.
  */
 export function refreshOnOpen(ctx) {
   const assets = ctx.db.prepare('SELECT a.*, c.sigungu_code FROM assets a JOIN complexes c USING (kapt_code)').all();
-  const recent = lastMonths(ctx.asOf(), 3);
+  const recent = lastMonths(ctx.asOf(), REFRESH_MONTHS);
   for (const sgg of new Set(assets.map((a) => a.sigungu_code))) {
     ctx.collector.ensure(sgg, recent, { mode: 'stale' }).catch((e) => console.warn(`[refresh] ${sgg}: ${e.message}`));
   }

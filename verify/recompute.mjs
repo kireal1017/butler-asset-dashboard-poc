@@ -2,6 +2,7 @@
 // 1) 저장된 원본 응답(raw_responses)을 이 파일의 파서로 다시 읽어 trades·fetch_log와 대조한다.
 // 2) PRD 7장 문장대로 현재가·증감·최근 거래·월별 시계열을 다시 계산해 서버 API 응답과 비교한다.
 // 3) --dom <file>: 화면에서 추출한 값(verify/dom-extract.js 결과)과도 비교한다.
+// 4) 개선 v2 비교 근거 3섹션(같은 층·같은 단지·같은 법정동)을 명세 문장대로 다시 계산해 API·화면과 비교한다.
 // 사용: node verify/recompute.mjs [--api http://localhost:3001] [--dom verify/out/dom.json]
 import fs from 'node:fs';
 import os from 'node:os';
@@ -78,6 +79,7 @@ for (const log of logs) {
     for (const b of itemsOf(p.body)) {
       parsed.push({
         aptSeq: tagValue(b, 'aptSeq'),
+        aptNm: tagValue(b, 'aptNm'),
         umdCd: tagValue(b, 'umdCd'),
         bonbun: parseInt(tagValue(b, 'bonbun') || 'NaN', 10),
         bubun: parseInt(tagValue(b, 'bubun') || 'NaN', 10),
@@ -187,7 +189,7 @@ function fnv1a(s) {
 // 같은 단지: K-APT 지번(법정동·본번·부번)과 같은 실거래 단지 + 저장된 오버라이드.
 // 그중 자산의 동이 거래에 가장 많이 나온 단지, 없으면 대장 면적과 정확히 같은 면적 거래가 있는 유일한 단지, 그것도 없으면 전체.
 // 같은 지번에 K-APT 단지가 둘 이상이면(이름 규칙 필요) 앱 범위가 지번 집합의 부분집합인지만 확인한다.
-function independentScope(asset) {
+function lotSeqs(asset) {
   const umd = asset.bjd_code.slice(5);
   const lot = new Set();
   for (const [key, list] of rawByMonth) {
@@ -195,6 +197,10 @@ function independentScope(asset) {
     for (const t of list) if (t.umdCd === umd && t.bonbun === asset.bonbun && t.bubun === asset.bubun) lot.add(t.aptSeq);
   }
   for (const r of db.prepare('SELECT apt_seq FROM complex_trade_link_override WHERE kapt_code = ?').all(asset.kapt_code)) lot.add(r.apt_seq);
+  return lot;
+}
+function independentScope(asset) {
+  const lot = lotSeqs(asset);
   const shared = db.prepare('SELECT COUNT(*) n FROM complexes WHERE bjd_code = ? AND bonbun = ? AND bubun = ? AND kapt_code <> ?')
     .get(asset.bjd_code, asset.bonbun, asset.bubun, asset.kapt_code).n > 0;
   const seqs = [...lot].sort();
@@ -224,6 +230,115 @@ function independentFrom(range, asOf, asset) {
   return addMonthsYm(asOf, -(RANGE_N[range] - 1));
 }
 
+// ---------- 개선 v2 비교 근거 재구현 (docs/IMPROVEMENT-SPEC.md 3.3~3.5 문장대로) ----------
+// 같은 층: 현재가 범위·36개월(기준 월 포함), 같은 층이 없으면 ±2층(1층 미만 제외), 최근 5건.
+// 같은 단지: 지번 연결 전체·12개월·±5㎡·직거래 포함, 중앙값(짝수면 가운데 둘 평균 반올림), 내 면적 ±0.1㎡ 한 줄 + 나머지 면적값별, 가까운 순.
+// 같은 법정동: 같은 시군구·같은 법정동 코드, 내 단지 제외, 단지별 최근 거래·건수·최근 단지명, 최근 거래 순.
+function medianOf(xs) {
+  if (!xs.length) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  const h = Math.floor(s.length / 2);
+  return s.length % 2 === 1 ? s[h] : Math.round((s[h - 1] + s[h]) / 2);
+}
+function expectedComparisons(asset, scope, asOf) {
+  const f36 = addMonthsYm(asOf, -35);
+  const f12 = addMonthsYm(asOf, -11);
+  const within = (t, from) => t.ym >= from && t.ym <= asOf;
+  const own = comparable(asset.sigungu_code, scope, asset.area_u).filter((t) => Number.isInteger(t.floor) && within(t, f36));
+  let floorRange = { min: asset.floor, max: asset.floor, widened: false };
+  let fl = own.filter((t) => t.floor === asset.floor);
+  if (!fl.length) {
+    floorRange = { min: Math.max(1, asset.floor - 2), max: asset.floor + 2, widened: true };
+    fl = own.filter((t) => t.floor >= floorRange.min && t.floor <= floorRange.max);
+  }
+  const sgg = [];
+  for (const [key, list] of rawByMonth) if (key.startsWith(`${asset.sigungu_code}|`)) sgg.push(...list);
+  const link = lotSeqs(asset);
+  const near = (t) => !t.cancelled && within(t, f12) && Math.abs(t.area - asset.area_u) <= 50000;
+  const cx = sgg.filter((t) => link.has(t.aptSeq) && near(t)).sort(byTime);
+  const groups = new Map();
+  for (const t of cx) {
+    const mine = Math.abs(t.area - asset.area_u) <= 1000;
+    const k = mine ? 'mine' : t.area;
+    const g = groups.get(k) ?? { mine, areas: [], count: 0, latest: null };
+    if (!g.areas.includes(t.area)) g.areas.push(t.area);
+    g.count++;
+    g.latest = t;
+    groups.set(k, g);
+  }
+  const dist = (g) => (g.mine ? -1 : Math.abs(g.areas[0] - asset.area_u));
+  const sortedGroups = [...groups.values()].sort((a, b) => dist(a) - dist(b) || a.areas[0] - b.areas[0]).slice(0, 5);
+  const umd = asset.bjd_code.slice(5);
+  const hood = link.size ? sgg.filter((t) => t.umdCd === umd && !link.has(t.aptSeq) && near(t)).sort(byTime) : [];
+  const byApt = new Map();
+  for (const t of hood) {
+    const g = byApt.get(t.aptSeq) ?? { aptSeq: t.aptSeq, count: 0, latest: null };
+    g.count++;
+    g.latest = t;
+    byApt.set(t.aptSeq, g);
+  }
+  const complexes = [...byApt.values()].sort((a, b) => byTime(b.latest, a.latest));
+  return {
+    sameFloor: { floorRange, count: fl.length, trades: fl.slice(-5).reverse().map((t) => [t.ym, t.day, t.floor, t.amount, t.direct]) },
+    sameComplex: {
+      linked: link.size > 0, count: cx.length, median: medianOf(cx.map((t) => t.amount)),
+      groups: sortedGroups.map((g) => [g.mine, [...g.areas].sort((a, b) => a - b), g.count, g.latest.ym, g.latest.day, g.latest.amount]),
+    },
+    neighborhood: {
+      linked: link.size > 0, count: hood.length, complexCount: complexes.length, median: medianOf(hood.map((t) => t.amount)),
+      complexes: complexes.map((g) => [g.aptSeq, g.latest.aptNm, g.count, g.latest.ym, g.latest.day, g.latest.amount]),
+    },
+  };
+}
+function apiComparisons(c) {
+  return {
+    sameFloor: { floorRange: c.sameFloor.floorRange, count: c.sameFloor.count, trades: c.sameFloor.trades.map((t) => [t.ym, t.day, t.floor, t.amount, t.direct]) },
+    sameComplex: {
+      linked: c.sameComplex.linked, count: c.sameComplex.count, median: c.sameComplex.median,
+      groups: c.sameComplex.groups.map((g) => [g.mine, g.areas, g.count, g.latest.ym, g.latest.day, g.latest.amount]),
+    },
+    neighborhood: {
+      linked: c.neighborhood.linked, count: c.neighborhood.count, complexCount: c.neighborhood.complexCount, median: c.neighborhood.median,
+      complexes: c.neighborhood.complexes.map((g) => [g.aptSeq, g.name, g.count, g.latest.ym, g.latest.day, g.latest.amount]),
+    },
+  };
+}
+// 화면 표기 재구현 (client/src/utils/format.js와 다른 코드)
+function areaText(u) {
+  const whole = Math.trunc(u / 10000);
+  let frac = String(u - whole * 10000).padStart(4, '0');
+  while (frac.endsWith('0')) frac = frac.slice(0, -1);
+  return frac ? `${whole}.${frac}` : String(whole);
+}
+const r2 = (u) => String(Math.round(u / 100) / 100);
+function domComparisons(exp, asset) {
+  const f = exp.sameFloor;
+  const c = exp.sameComplex;
+  const h = exp.neighborhood;
+  const range = `전용 ${r2(asset.area_u - 50000)}~${r2(asset.area_u + 50000)}㎡ · 최근 12개월`;
+  return {
+    sameFloor: {
+      cond: `같은 단지·같은 면적·${f.floorRange.widened ? '±2층 기준' : `${asset.floor}층`} · 최근 3년`,
+      count: f.count ? String(f.count) : null,
+      rows: f.trades.map(([ym, , floor, amount]) => `${ymText(ym)}|${floor}층|${won(amount)}`),
+    },
+    sameComplex: {
+      cond: `${range} · 단지 전체 기준`,
+      count: c.count ? String(c.count) : null,
+      median: c.count ? won(c.median) : null,
+      rows: c.groups.map(([mine, areas, count, ym, , amount]) =>
+        [`${areas.map(areaText).join('·')}㎡`, ...(mine ? ['내 면적'] : []), ymText(ym), `${count}건`, won(amount)].join('|')),
+    },
+    neighborhood: {
+      cond: `${range} · 우리 단지 제외`,
+      count: h.count ? String(h.count) : null,
+      median: h.count ? won(h.median) : null,
+      complexes: h.count ? String(h.complexCount) : null,
+      rows: h.complexes.map(([, name, count, ym, , amount]) => [name, ymText(ym), `${count}건`, won(amount)].join('|')),
+    },
+  };
+}
+
 // ---------- API 비교 ----------
 const get = async (p) => {
   const r = await fetch(`${API}${p}`);
@@ -236,8 +351,8 @@ if (health.devFault) fail('health', `결함 주입이 켜져 있습니다 (${hea
 const list = (await get('/api/assets')).body;
 const AS_OF = envValue('AS_OF') || health.asOf;
 if (AS_OF !== health.asOf) fail('asOf', `env AS_OF ${AS_OF} ≠ server ${health.asOf}`);
-const assetRow = db.prepare('SELECT a.*, c.sigungu_code, c.bjd_code, c.bonbun, c.bubun FROM assets a JOIN complexes c USING (kapt_code) WHERE a.id = ?');
-const summary = { assets: 0, seriesChecked: 0, seriesSkipped: [], domChecked: 0, scopeChecked: 0, scopeTrustedSharedLot: [] };
+const assetRow = db.prepare('SELECT a.*, c.sigungu_code, c.bjd_code, c.bonbun, c.bubun, c.umd_name FROM assets a JOIN complexes c USING (kapt_code) WHERE a.id = ?');
+const summary = { assets: 0, seriesChecked: 0, seriesSkipped: [], comparisonsChecked: 0, domChecked: 0, scopeChecked: 0, scopeTrustedSharedLot: [] };
 const expectedForDom = {};
 
 for (const item of list.items) {
@@ -287,7 +402,25 @@ for (const item of list.items) {
     series[range] = exp;
   }
 
+  const cmp = await get(`/api/assets/${item.id}/comparisons`);
+  let expCompare = null;
+  const KEYS = ['sameFloor', 'sameComplex', 'neighborhood'];
+  if (cmp.status !== 200) fail(`${w} comparisons`, `status ${cmp.status}`);
+  else if (KEYS.some((k) => cmp.body[k].status !== 'ready')) {
+    fail(`${w} comparisons`, `not ready: ${KEYS.map((k) => cmp.body[k].status)}`);
+  } else {
+    const exp = expectedComparisons(asset, scope, AS_OF);
+    const got = apiComparisons(cmp.body);
+    for (const k of KEYS) {
+      summary.comparisonsChecked++;
+      if (!same(exp[k], got[k])) fail(`${w} comparisons.${k}`, `expected ${JSON.stringify(exp[k])} got ${JSON.stringify(got[k])}`);
+    }
+    if (cmp.body.neighborhood.dong !== asset.umd_name) fail(`${w} comparisons.dong`, `${cmp.body.neighborhood.dong} ≠ ${asset.umd_name}`);
+    expCompare = domComparisons(exp, asset);
+  }
+
   expectedForDom[item.id] = {
+    compare: expCompare,
     currentPrice: expCurrent ? won(expCurrent.amount) : null,
     dealYm: expCurrent ? `${ymText(expCurrent.ym)} 거래` : null,
     changeAmount: expChange ? signed(expChange.diff) : null,
@@ -313,6 +446,14 @@ if (DOM_FILE) {
       if (got.recentTrades) {
         summary.domChecked++;
         if (!same(got.recentTrades, exp.recentTrades)) fail(`dom ${id} ${where}.recentTrades`, `expected ${JSON.stringify(exp.recentTrades)} got ${JSON.stringify(got.recentTrades)}`);
+      }
+      // 개선 v2 비교 근거: 섹션별 조건·건수·중앙값·목록 문자열
+      for (const [key, sec] of Object.entries(got.compare ?? {})) {
+        const e = exp.compare?.[key];
+        for (const [k, v] of Object.entries(sec)) {
+          summary.domChecked++;
+          if (!same(v ?? null, e?.[k] ?? null)) fail(`dom ${id} ${where}.compare.${key}.${k}`, `expected ${JSON.stringify(e?.[k])} got ${JSON.stringify(v)}`);
+        }
       }
       // 그래프 data-series는 [ym, value, trade] 배열의 JSON을 FNV-1a로 요약해 비교한다 (dom-extract.js와 같은 함수)
       for (const [range, digest] of Object.entries(got.series ?? {})) {
