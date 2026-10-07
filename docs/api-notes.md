@@ -122,3 +122,32 @@
 - 앱을 열 때 자산이 있는 시군구마다 **최근 12개월**(기존 3개월) 중 마지막 수집 후 30일이 지난 달을 다시 받는다(`REFRESH_MONTHS`, `server/src/services/valuation.js`).
 - 늘어나는 호출: 시군구 1곳당 30일마다 최대 12회(기존 3회). 이 PoC(노원구·종로구)는 최대 24회/30일로, 실거래 API 일일 한도 10,000회 대비 무시할 수준이다. 노원구처럼 한 달 거래가 1,000건을 넘으면 페이지 수만큼 더 든다.
 - 재수집으로 확정된 매입 거래가 해제로 바뀌는 경우: 매입가는 자산에 복사해 둔 값이라 그대로 남고(카드의 매입가 대비 증감도 유지), 그 거래는 같은 층 목록·최근 거래·현재가 계산에서만 빠진다(기존 동작 유지).
+
+## 8. v3 추가 API 실측 (2026-10-08, `scripts/v3-api-probe.mjs`)
+
+| API | 주소 | 결과 |
+|---|---|---|
+| 아파트 전월세 실거래가 | `https://apis.data.go.kr/1613000/RTMSDataSvcAptRent/getRTMSDataSvcAptRent` (`serviceKey`, `LAWD_CD`, `DEAL_YMD`, `pageNo`, `numOfRows`) | **정상**(기존 `DATA_GO_KR_SERVICE_KEY`). XML, `resultCode 000`. 노원구 2026-09 885건, 하계동 71건 |
+| 건축HUB 표제부 | `https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo` (`sigunguCd`, `bjdongCd`, `platGbCd=0`, `bun`(4), `ji`(4), `_type=json`) | **정상**(같은 키, 추가 신청 불필요). JSON, `resultCode "00"`(실거래의 `"000"`과 다름) |
+| 건축HUB 총괄표제부 | `.../getBrRecapTitleInfo` (같은 인자) | **정상**. 하계 270번지 1건 |
+| R-ONE 통계 | `https://www.reb.or.kr/r-one/openapi/{SttsApiTbl,SttsApiTblItm,SttsApiTblData}.do` (`KEY`, `Type=json`, `pIndex`, `pSize`) | **정상**(`RONE_API_KEY`). 응답 `content-type`은 text/html이지만 본문은 JSON |
+
+### 전월세 실거래 응답
+- 필드: `aptNm, aptSeq, buildYear, contractTerm, contractType, dealDay, dealMonth, dealYear, deposit, excluUseAr, floor, jibun, monthlyRent, preDeposit, preMonthlyRent, roadnm…, sggCd, umdNm, useRRRight`
+- 금액은 만원 단위 문자열에 쉼표(`deposit "17,850"`), 저장 시 원 단위로 변환한다.
+- **`aptSeq`가 있다.** v3 6장의 `rent_transactions`는 단지명·지번으로 맞추게 되어 있지만, 매매와 같은 `aptSeq`로 단지 연결 집합(`resolveLink`)을 그대로 쓸 수 있어 더 정확하다 → `rent_transactions`에 `apt_seq` 컬럼을 둔다.
+- 동·호 없음(명세와 같음). `contractType`은 빈 값(`" "`)인 행이 있다(신규/갱신 미기재) — 저장만 하고 거르지 않는다(v3 7.6).
+
+### 건축물대장 표제부 (하계현대우성, 하계동 270)
+- 21줄: 아파트 동 외에 중간기계실·노인정·관리사무소·중앙공급실도 **주용도가 '공동주택'**으로 나온다. "공동주택 중 지상 층수 최대 줄" 규칙으로 15층 동(110동)이 대표로 뽑힌다(1층 오류 없음). 상가동은 '제1종근린생활시설'.
+- 동별 `hhldCnt`(120·90…), 총괄표제부 `hhldCnt 1320`(K-APT 세대수와 일치) → 세대수는 총괄표제부 우선.
+- 주차: 표제부는 동별 `indr/oudr` × `Auto/Mech` 대수, 총괄표제부 `totPkngCnt`가 이 단지에서는 0 → 대장 주차는 신뢰하기 어렵다. 0이면 행을 숨긴다(v3 8.3 "값이 없는 행은 숨긴다"). (참고: K-APT 주차 992대)
+- 사용승인일: 동별 `useAprDay` 19881130 / 부속 19880929, 총괄표제부는 공백 → 대표 동의 값 사용.
+- 구조 `strctCdNm`(철근콘크리트구조), 연면적 총괄 `totArea` 147,781㎡.
+
+### R-ONE 전월세전환율
+- **한 번에 1,000건을 요청하면 서버가 연결을 끊는다**(`terminated`). `pSize`는 100 이하로 나눠 받는다.
+- 통계표: `A_2024_00156` "지역별 전월세 전환율_아파트"(월), 지역 분류 `CLS_ID 500006` = 서울, 항목 `ITM_ID 100001` "전월세 전환율", 단위 %. 종합주택(`A_2024_00155`)과 혼동 주의.
+- 조회: `SttsApiTblData.do?STATBL_ID=A_2024_00156&DTACYCLE_CD=MM&CLS_ID=500006&START_WRTTIME=YYYYMM&END_WRTTIME=YYYYMM` → 서울 행만 온다.
+- 최근 값: **2026-07 4.74%**(2026-06 4.74, 2026-05 4.73). 기준 월 2026-10 대비 약 3개월 늦게 공표된다 → 화면 주석 "서울, 기준 2026.07".
+- `.env`에 수동 대체값(`RENT_CONVERSION_RATE`)은 없다. R-ONE 실패 시 v3 7.5 문구로 환산 행을 숨긴다.

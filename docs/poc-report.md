@@ -4,7 +4,8 @@
 - 대상: 버틀러 임대인 자산관리 서비스의 "자산 현황 대시보드" 모듈
 - 저장소: https://github.com/kireal1017/butler-asset-dashboard-poc
 - 관련 문서: [PRD](PRD.md) · [API 실측 노트](api-notes.md) · [검증 기록](verification.md) · [디자인 대조](design-checklist.md) · [데이터 품질 평가](data-quality.md) · [개선 명세 v2.1](IMPROVEMENT-SPEC.md) · [E0 실측](e0-measure.md)
-- 화면 캡처: [`docs/screens/`](screens/) (390×844 모바일 기준, 27장 — 24~27은 개선 v2)
+- 화면 캡처: [`docs/screens/`](screens/) (390×844 모바일 기준, 30장 — 24~30은 개선 v2와 E2E)
+- **최종 정리본:** [개발 완료 보고서](development-completion-report.md) (PoC + 개선 v2 + E2E 검증, 화면 30장)
 
 ---
 
