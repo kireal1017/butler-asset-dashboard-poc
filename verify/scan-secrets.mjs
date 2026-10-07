@@ -25,7 +25,7 @@ for (const f of files) {
 // 2) git 이력 전체
 check('git history', git('log -p --all'));
 // 3) DB 원본 응답
-const dbPath = env.DB_PATH || path.join(process.env.LOCALAPPDATA || os.homedir(), 'butler-poc', 'app.db');
+const dbPath = env.DB_PATH || path.join(os.homedir(), '.butler-poc', 'app.db');
 if (fs.existsSync(dbPath)) {
   const db = new Database(dbPath, { readonly: true });
   for (const r of db.prepare('SELECT sgg_cd, deal_ym, page, body FROM raw_responses').iterate()) check(`raw_responses ${r.sgg_cd}/${r.deal_ym}/${r.page}`, r.body);

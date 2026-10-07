@@ -1,6 +1,6 @@
 # API 확인 노트 (M0)
 
-확인일 2026-10-05. 재현: `node scripts/m0-probe.mjs` (응답은 `%LOCALAPPDATA%\butler-poc\m0-cache`에 캐시, `--refresh`로 재호출).
+확인일 2026-10-05. 재현: `node scripts/m0-probe.mjs` (응답은 `~/.butler-poc/m0-cache`에 캐시, `--refresh`로 재호출).
 인증키는 이 문서와 `server/test/fixtures/`에 들어 있지 않다(원본·URL 인코딩 형태 모두 grep 0건).
 
 ## 1. 엔드포인트와 요청 변수 (실측)

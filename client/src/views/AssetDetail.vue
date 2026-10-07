@@ -83,7 +83,7 @@ async function removeAsset() {
 const purchaseLine = computed(() => {
   const p = asset.value?.purchase;
   if (!p) return '';
-  return p.source === 'matched' ? `${formatYmd(p.date)} 계약 · ${formatFloor(asset.value.floor)}` : `취득 ${formatYm(p.ym)} · 직접 입력`;
+  return p.source === 'matched' ? `${formatYmd(p.date)} 계약 · ${formatFloor(asset.value.floor)}` : `취득 ${formatYm(p.ym)}`;
 });
 </script>
 
@@ -113,7 +113,7 @@ const purchaseLine = computed(() => {
           :data-kind="k" @click="chartKind = k">{{ label }}</button>
       </div>
       <TrendChart v-if="series" :points="series.points" :purchase="series.purchase" :kind="chartKind" />
-      <p v-if="series && chartKind === 'bar'" class="caption muted">막대: 거래가 있는 달의 마지막 거래 금액</p>
+      <p v-if="series && chartKind !== 'step'" class="caption muted">{{ chartKind === 'bar' ? '막대: 거래가 있는 달의 마지막 거래 금액' : '선: 실제 거래 금액을 시간순으로 연결' }}</p>
       <ProgressBar v-if="loadingRange" :done="progress?.done ?? 0" :total="progress?.total ?? 0" :label="`${RANGE_LABEL[loadingRange]} 자료를 불러오는 중`" />
       <div class="tabs" role="tablist" aria-label="기간">
         <button v-for="r in detail.ranges" :key="r" type="button" class="tab" role="tab" :aria-selected="range === r" :data-range="r"

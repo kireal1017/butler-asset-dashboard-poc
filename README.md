@@ -22,7 +22,7 @@
    DATA_GO_KR_SERVICE_KEY=<일반 인증키(Decoding)>
    ```
 
-   - 선택: `DB_PATH`(기본 `%LOCALAPPDATA%\butler-poc\app.db`. OneDrive 같은 동기화 폴더 밖에 둡니다), `AS_OF`(기준 월 YYYYMM 고정, 검증용), `API_PORT`(기본 3001)
+   - 선택: `DB_PATH`(기본 `~/.butler-poc/app.db`. OneDrive 같은 동기화 폴더와, 실행한 앱에 따라 다른 실제 폴더로 보일 수 있는 `%LOCALAPPDATA%` 밖에 둡니다), `AS_OF`(기준 월 YYYYMM 고정, 검증용), `API_PORT`(기본 3001)
    - `.env`는 git에 올리지 않습니다. 키는 화면, 로그, 오류 메시지에 나오지 않습니다.
 
 ## 설치와 실행

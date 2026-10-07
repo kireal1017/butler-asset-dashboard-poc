@@ -2,13 +2,14 @@
 // for 하계동 complexes, picks golden case A, and writes key-free fixtures.
 // Usage: node scripts/m0-probe.mjs [--refresh]
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const KEY = readKey();
-const CACHE_DIR = path.join(process.env.LOCALAPPDATA || path.join(ROOT, '.cache'), 'butler-poc', 'm0-cache');
+const CACHE_DIR = path.join(os.homedir(), '.butler-poc', 'm0-cache');
 const FIXTURE_DIR = path.join(ROOT, 'server', 'test', 'fixtures');
 const REFRESH = process.argv.includes('--refresh');
 fs.mkdirSync(CACHE_DIR, { recursive: true });

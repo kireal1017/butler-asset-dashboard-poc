@@ -24,7 +24,7 @@ function envValue(name) {
   const line = fs.readFileSync(file, 'utf8').split(/\r?\n/).find((l) => l.startsWith(`${name}=`));
   return line ? line.slice(name.length + 1).trim() : '';
 }
-const DB_PATH = envValue('DB_PATH') || path.join(process.env.LOCALAPPDATA || os.homedir(), 'butler-poc', 'app.db');
+const DB_PATH = envValue('DB_PATH') || path.join(os.homedir(), '.butler-poc', 'app.db');
 const db = new Database(DB_PATH, { readonly: true });
 
 const problems = [];

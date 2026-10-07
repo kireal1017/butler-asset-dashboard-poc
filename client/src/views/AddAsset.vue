@@ -101,7 +101,8 @@ async function submit() {
 
     <section class="stack">
       <label class="title-sm" for="complex-search">1. 단지 검색</label>
-      <input id="complex-search" v-model="query" class="input" placeholder="단지명 일부 (예: 하계현대)" autocomplete="off" data-testid="complex-search" />
+      <!-- v-model은 한글 조합 중에는 값을 갱신하지 않아 마지막 글자가 검색에 빠진다. 입력마다 반영한다. -->
+      <input id="complex-search" :value="query" class="input" @input="query = $event.target.value" placeholder="단지명 일부 (예: 하계현대)" autocomplete="off" data-testid="complex-search" />
       <ul v-if="results.length" class="results card" data-testid="complex-results">
         <li v-for="c in results" :key="c.kaptCode">
           <button type="button" class="result" :data-kapt="c.kaptCode" @click="pick(c)">

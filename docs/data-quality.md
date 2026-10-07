@@ -5,7 +5,7 @@
   - 노원구(11350) 2016-07 ~ 2026-10, 124개월
   - 종로구(11110) 2016-11 ~ 2026-10, 120개월
   - 합계 244개월, 거래 70,141건
-- 재현: `%LOCALAPPDATA%\butler-poc\app.db`의 `raw_responses`, `trades`, `fetch_log` 테이블을 집계 (외부 호출 없음)
+- 재현: 당시 DB(`%LOCALAPPDATA%\butler-poc\app.db`, 지금 기본 위치는 `~/.butler-poc/app.db`)의 `raw_responses`, `trades`, `fetch_log` 테이블을 집계 (외부 호출 없음)
 
 ## 1. 결측 실측
 

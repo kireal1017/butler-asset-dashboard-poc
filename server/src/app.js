@@ -5,6 +5,8 @@ import { createAsset, deleteAsset, getAssetRow, lookupUnit, startInitialCollecti
 import { assetDetail, assetSeries, listAssets, refreshOnOpen } from './services/valuation.js';
 import { deletePurchase, purchaseCandidates, savePurchase } from './services/purchase.js';
 
+const EXTERNAL_CODES = new Set(['QUOTA', 'KEY_NOT_REGISTERED', 'EXTERNAL']);
+
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res)).catch(next);
 
 export function createApp(ctx) {
@@ -83,10 +85,12 @@ export function createApp(ctx) {
 
   // 오류 응답: 원인과 다음 행동을 한 문장으로 (PRD 13장)
   app.use((err, req, res, next) => {
-    const status = err.status ?? (err.code === 'QUOTA' ? 429 : err.code ? 502 : 500);
+    // 앱이 정의한 오류만 메시지를 그대로 보여 준다. 그 밖의 오류(SQLite 등)는 code가 있어도 내부 오류로 감춘다.
+    const known = err.status || EXTERNAL_CODES.has(err.code);
+    const status = err.status ?? (err.code === 'QUOTA' ? 429 : known ? 502 : 500);
     if (status >= 500) console.error('[api]', err.message);
-    const message = status === 500 ? '일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.' : err.message;
-    res.status(status).json({ error: { code: err.code ?? 'INTERNAL', message, reason: err.reason } });
+    const message = known ? err.message : '일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.';
+    res.status(status).json({ error: { code: known ? err.code : 'INTERNAL', message, reason: err.reason } });
   });
 
   return app;

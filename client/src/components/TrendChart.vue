@@ -1,6 +1,6 @@
 <script setup>
 // PRD 7.7 그래프: 계단형 선, 거래 점, 매입가 점선 기준선, 매입 시점 표시, 터치 시 값 표시.
-// kind: 'step'(기본, PRD) | 'line'(월별 값을 직선으로 연결) | 'bar'(거래가 있는 달의 마지막 거래 금액, 0부터)
+// kind: 'step'(기본, PRD) | 'line'(실제 거래 점끼리 직선 연결) | 'bar'(거래가 있는 달의 마지막 거래 금액, 0부터)
 // SVG 렌더러를 써서 DOM에서 요소를 확인할 수 있게 하고, 시계열을 data-series에 그대로 둔다 (검증용).
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import * as echarts from 'echarts/core';
@@ -23,7 +23,8 @@ let chart = null;
 
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const axisLabel = (ym) => `${ym.slice(2, 4)}.${ym.slice(4)}`;
-const eokLabel = (v) => (v >= 10000 ? `${(v / 10000).toFixed(v % 10000 ? 1 : 0)}억` : `${(v / 1000).toFixed(0)}천`);
+// 금액 단위는 만원: 10000 → 1억, 5000 → 5천만
+const eokLabel = (v) => (v === 0 ? '0' : v >= 10000 ? `${(v / 10000).toFixed(v % 10000 ? 1 : 0)}억` : `${(v / 1000).toFixed(v % 1000 ? 1 : 0)}천만`);
 
 const empty = computed(() => (props.kind === 'bar' ? props.points.every((p) => p.trade === null) : props.points.every((p) => p.value === null)));
 const dataSeries = computed(() => JSON.stringify(props.points.map((p) => ({ ym: p.ym, value: p.value, trade: p.trade ? p.trade.amount : null }))));
@@ -35,11 +36,12 @@ function option() {
   const purchaseInRange = props.purchase && yms.includes(props.purchase.ym);
   const isBar = props.kind === 'bar';
   const trades = props.points.map((p) => (p.trade ? p.trade.amount : null));
+  const dataMax = Math.max(0, ...props.points.map((p) => p.value ?? 0), ...trades.map((t) => t ?? 0));
   const marks = {
     markLine: props.purchase ? {
       symbol: 'none', silent: true,
       lineStyle: { color: muted, type: 'dashed', width: 1.5 },
-      label: { formatter: '매입가', color: muted, fontSize: 11, position: 'insideEndTop' },
+      label: { formatter: '매입가', color: muted, fontSize: 11, position: 'insideEndTop', backgroundColor: css('--c-canvas'), padding: [1, 4] },
       data: [{ yAxis: props.purchase.price }],
     } : undefined,
     markPoint: purchaseInRange ? {
@@ -50,11 +52,13 @@ function option() {
     } : undefined,
   };
   const series = isBar
-    ? [{ type: 'bar', name: '거래', data: trades, barMaxWidth: 10, itemStyle: { color: css('--c-brand-coral'), borderColor: ink, borderWidth: 1, borderRadius: [3, 3, 0, 0] }, ...marks }]
+    ? [{ type: 'bar', name: '거래', data: trades, barMaxWidth: 10, itemStyle: { color: css('--c-brand-coral'), borderRadius: [2, 2, 0, 0] }, ...marks }]
     : [
       {
-        type: 'line', name: '추이', step: props.kind === 'step' ? 'end' : false, showSymbol: false, connectNulls: false,
-        data: props.points.map((p) => p.value), lineStyle: { color: ink, width: 2 }, ...marks,
+        // 계단: 월별 기준 금액(직전 거래 유지). 선: 실제 거래 점끼리 직선으로 연결.
+        type: 'line', name: '추이', step: props.kind === 'step' ? 'end' : false, showSymbol: false,
+        connectNulls: props.kind === 'line',
+        data: props.kind === 'line' ? trades : props.points.map((p) => p.value), lineStyle: { color: ink, width: 2 }, ...marks,
       },
       { type: 'scatter', name: '거래', symbolSize: 8, data: trades, itemStyle: { color: css('--c-brand-coral'), borderColor: ink, borderWidth: 1 } },
     ];
@@ -68,9 +72,10 @@ function option() {
     },
     yAxis: {
       type: 'value', scale: !isBar,
-      // 매입가 기준선이 항상 보이도록 축 범위에 매입가를 포함한다 (천만 단위로 내림/올림). 막대는 높이 비교가 맞도록 0부터.
-      min: isBar ? 0 : (v) => Math.floor(Math.min(v.min, props.purchase?.price ?? v.min) / 1000) * 1000,
-      max: (v) => Math.ceil(Math.max(v.max, props.purchase?.price ?? v.max) / 1000) * 1000,
+      // 막대는 높이 비교가 맞도록 0부터. 매입가가 거래가보다 낮으면 기준선이 보이도록 아래쪽만 넓힌다(5천만 단위).
+      // 위쪽은 라이브러리 자동 눈금에 맡겨 끝 눈금끼리 겹치지 않게 한다.
+      min: isBar ? 0 : props.purchase ? (v) => Math.floor(Math.min(v.min, props.purchase.price) / 5000) * 5000 : undefined,
+      max: props.purchase && props.purchase.price > dataMax ? Math.ceil(props.purchase.price / 5000) * 5000 : undefined,
       axisLabel: { formatter: eokLabel, color: muted, fontSize: 11 },
       splitLine: { lineStyle: { color: css('--c-hairline-soft') } },
     },

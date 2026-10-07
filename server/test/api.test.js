@@ -151,3 +151,13 @@ describe('purchase edits (review fixes)', () => {
     expect((await request(app).get('/api/assets')).body.items[0].status).toBe('ready');
   });
 });
+
+describe('error responses', () => {
+  it('hides internal error messages even when the error carries a code', async () => {
+    ctx.db.prepare = (() => { const orig = ctx.db.prepare.bind(ctx.db); return (sql) => { if (/FROM assets WHERE user_id/.test(sql)) { const e = new Error('database disk image is malformed'); e.code = 'SQLITE_CORRUPT'; throw e; } return orig(sql); }; })();
+    const app = createApp(ctx);
+    const res = await request(app).get('/api/assets').expect(500);
+    expect(res.body.error.code).toBe('INTERNAL');
+    expect(res.body.error.message).not.toMatch(/malformed/);
+  });
+});

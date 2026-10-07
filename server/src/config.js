@@ -28,7 +28,9 @@ export function loadConfig(overrides = {}) {
   if (devFault && asOf) throw new Error('--dev-fault cannot be combined with AS_OF');
   return {
     serviceKey: env('DATA_GO_KR_SERVICE_KEY'),
-    dbPath: env('DB_PATH') || path.join(process.env.LOCALAPPDATA || os.homedir(), 'butler-poc', 'app.db'),
+    // %LOCALAPPDATA%는 Windows 패키지 앱(MSIX)이 띄운 프로세스와 일반 프로세스에서 서로 다른 실제 폴더로 보일 수 있다.
+    // DB 파일과 WAL이 다른 계층에 나뉘면 손상되므로, 가상화되지 않는 홈 폴더를 기본값으로 쓴다.
+    dbPath: env('DB_PATH') || path.join(os.homedir(), '.butler-poc', 'app.db'),
     asOf,
     port: Number(env('API_PORT') || 3001),
     devFault,
