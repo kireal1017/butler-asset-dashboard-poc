@@ -2,8 +2,8 @@
 
 `docs/DESIGN.md`(Attio 계열, 데스크탑 기준)를 v3의 **모바일 폭 전용** 화면에 맞게 줄인 적용본이에요. v3 화면의 시각 기준은 이 문서이고, 여기 없는 것은 DESIGN.md를 따르되 데스크탑 전용 패턴은 가져오지 않아요.
 
-- 토큰: `client/src/styles/tokens-v3.css` · 공통 컴포넌트: `client/src/ui/` · 견본: `/__swatch`
-- 전환 기간에는 기존 `tokens.css`·`base.css`와 함께 불러와요. 새 컴포넌트는 scoped 스타일만 쓰고 `base.css` 전역 클래스(`.btn`·`.card`·`.stack` 등)에 기대지 않아요. 컴포넌트에 hex를 직접 쓰지 않아요.
+- 토큰: `client/src/styles/tokens-v3.css` · 공통 컴포넌트: `client/src/ui/` · 견본 캡처: `docs/screens/v3/00-swatch-1.jpg`
+- `base.css`는 전역 기본값(초기화, 바탕색, 글꼴)만 두고 이 토큰을 써요. 컴포넌트는 scoped 스타일만 쓰고 hex를 직접 쓰지 않아요. (옛 `tokens.css`와 전역 클래스는 4단계에서 지웠어요.)
 
 ## 1. 범위와 결정 (C1~C12)
 

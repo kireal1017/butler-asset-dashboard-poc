@@ -1,6 +1,6 @@
 /*
  * v3 토큰 — docs/DESIGN.md(Attio 계열)의 모바일 적용본(docs/DESIGN-mobile.md).
- * 전환 기간에는 기존 tokens.css(--c-*, --s-*, --r-*, --t-*)와 함께 로드한다. 이름이 겹치지 않는다.
+ * base.css(전역 기본값)가 이 변수를 쓴다.
  * 새 컴포넌트(client/src/ui)는 이 변수만 쓰고 hex를 직접 쓰지 않는다.
  */
 :root {

@@ -133,8 +133,11 @@ async function collectAnalysis() {
   await loadAnalysis();
 }
 onMounted(collectAnalysis);
+// 건물 정보가 늦게 와서 호실이 null → id로 바뀔 때도 그 호실로 다시 읽는다
 watch(selected, (id, prev) => {
-  if (prev != null && id !== prev) loadAnalysis();
+  if (id === prev) return;
+  ticks = 0;
+  loadAnalysis();
 });
 async function retrySpec() {
   specRetrying.value = true;

@@ -2,7 +2,8 @@
 // 1) 저장된 원본 응답(raw_responses)을 이 파일의 파서로 다시 읽어 trades·fetch_log와 대조한다.
 // 2) 호실마다 참고가·기준일·건수, 기간 평균(1·3·6개월), 가격 범위·위치 막대, 최근 거래, 매입가 대비,
 //    비교 3가지, 매입가 제안을 명세 문장대로 다시 계산해 서버 API 응답과 비교한다(기준 월 AS_OF).
-// 사용: node verify/recompute.mjs [--api http://localhost:3001]
+// 3) --dom이 있으면 화면에서 뽑은 값(verify/dom-extract.js)을 같은 재계산 값으로 만든 표기와 비교한다.
+// 사용: node verify/recompute.mjs [--api http://localhost:3001] [--dom verify/out/dom.json]
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -383,6 +384,8 @@ const summary = {
   buildings: 0, units: 0, scopeChecked: 0, scopeTrustedSharedLot: [], valueChecked: 0, referenceChecked: 0,
   comparisonsChecked: 0, comparisonsSkipped: [], suggestionsChecked: 0, suggestionsSkipped: [],
 };
+// --dom 비교용 기대값 (호실 id → 재계산 결과)
+const domExp = {};
 
 const list = (await get('/api/buildings')).body;
 for (const b of list.items) {
@@ -417,6 +420,7 @@ for (const b of list.items) {
       const l = windowTrades(trades, addMonthsYm(AS_OF, -(m - 1)), AS_OF);
       return { months: m, from: addMonthsYm(AS_OF, -(m - 1)), to: AS_OF, count: l.length, average: avgWon(l) };
     });
+    domExp[u.id] = { asset, buildingId: b.id, ref: expRef, avg: expAvg, purchase: row.purchase_price, acquisitionYm: row.acquisition_ym };
     if (!same(expAvg, v.periodAverages)) fail(`${w} periodAverages`, `expected ${JSON.stringify(expAvg)} got ${JSON.stringify(v.periodAverages)}`);
     const amounts = w12.map((t) => t.amount * 10000);
     const expRange = amounts.length ? { count: amounts.length, min: Math.min(...amounts), max: Math.max(...amounts) } : { count: 0, min: null, max: null };
@@ -439,6 +443,7 @@ for (const b of list.items) {
     else if (KEYS.some((k) => cmp.body[k].status !== 'ready')) summary.comparisonsSkipped.push(`${u.id}:${KEYS.map((k) => cmp.body[k].status).join('/')}`);
     else {
       const exp = expectedComparisons(asset, scope, AS_OF);
+      domExp[u.id].cmp = exp;
       const got = apiComparisons(cmp.body);
       for (const k of KEYS) {
         summary.comparisonsChecked++;
@@ -539,6 +544,7 @@ for (const b of list.items) {
     };
   }
   summary.analysisChecked++;
+  for (const u of units) if (domExp[u.id]) Object.assign(domExp[u.id], { metrics: expMetrics, rate });
   if (!same({ leasedUnits: leased.length, metrics: expMetrics }, a.myBuilding)) fail(`building ${b.id} myBuilding`, `expected ${JSON.stringify({ leasedUnits: leased.length, metrics: expMetrics })} got ${JSON.stringify(a.myBuilding)}`);
 
   // 주변 전월세: 같은 단지(지번 연결 집합)·±5㎡·6→12개월·3건
@@ -561,7 +567,79 @@ for (const b of list.items) {
     if (!exp) exp = { enough: false, count12: all.filter((r) => r.ym >= addMonthsYm(AS_OF, -11) && r.ym <= AS_OF).length };
     const got = exp.enough ? { enough: n.enough, months: n.months, count: n.count, average: n.average, min: n.min, max: n.max } : { enough: n.enough, count12: n.count12 };
     summary.analysisChecked++;
+    if (domExp[u.id]) domExp[u.id].nearby = exp;
     if (!same(exp, got)) fail(`unit ${u.id} nearby`, `expected ${JSON.stringify(exp)} got ${JSON.stringify(got)}`);
+  }
+}
+
+// ---------- 화면 값 비교 (--dom verify/out/dom.json, 추출은 verify/dom-extract.js) ----------
+// 원 단위 금액 표기 재구현 (client/src/ui/format.js와 다른 코드): 12억 5,000만원 / 99만 7,403원 / 0원
+function wonText(v) {
+  if (v === 0) return '0원';
+  const g = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const eok = Math.trunc(v / 1e8);
+  const man = Math.trunc((v - eok * 1e8) / 1e4);
+  const rest = v - eok * 1e8 - man * 1e4;
+  return `${[eok ? `${g(eok)}억` : '', man ? `${g(man)}만` : '', rest ? g(rest) : ''].filter(Boolean).join(' ')}원`;
+}
+const dateText = (d) => `${d.slice(0, 4)}.${d.slice(4, 6)}.${d.slice(6, 8)}`;
+const DOM = arg('--dom', null);
+if (DOM) {
+  const dom = JSON.parse(fs.readFileSync(path.resolve(DOM), 'utf8'));
+  summary.domValuesChecked = 0;
+  const check = (where, exp, got) => {
+    summary.domValuesChecked++;
+    if (exp !== got) fail(`dom ${where}`, `expected ${JSON.stringify(exp)} got ${JSON.stringify(got)}`);
+  };
+  if (dom.asOf !== AS_OF) fail('dom', `asOf ${dom.asOf} ≠ ${AS_OF}`);
+  for (const [id, e] of Object.entries(domExp)) {
+    const d = dom.units[id];
+    if (!d) { fail(`dom unit ${id}`, '화면 값이 없습니다'); continue; }
+    // 호실 상세
+    check(`unit ${id} purchase`, wonText(e.purchase), d.unit.purchase);
+    check(`unit ${id} acquisition`, ymText(e.acquisitionYm), d.unit.acquisition);
+    if (e.ref.value != null) {
+      check(`unit ${id} reference`, wonText(e.ref.value), d.unit.reference);
+      check(`unit ${id} reference-date`, dateText(e.ref.referenceDate), d.unit['reference-date']);
+    }
+    const shown = (await get(`/api/units/${id}`)).body.unit.lease;
+    if (shown) {
+      const l = db.prepare('SELECT * FROM leases WHERE id = ?').get(shown.id);
+      check(`unit ${id} deposit`, wonText(l.deposit), d.unit.deposit);
+      check(`unit ${id} rent`, l.lease_type === 'JEONSE' ? '전세' : wonText(l.monthly_rent), d.unit.rent);
+      if (Number.isFinite(e.rate)) check(`unit ${id} converted`, wonText(conv(l.deposit, l.monthly_rent, e.rate)), d.unit.converted);
+    }
+    // 매매 시세 카드
+    if (e.ref.value != null) {
+      check(`unit ${id} sale reference`, wonText(e.ref.value), d.sale.reference);
+      check(`unit ${id} sale basis`, `기준일 ${dateText(e.ref.referenceDate)} · 같은 단지·같은 면적 최근 거래 ${e.ref.count}건 기준`, d.sale.basis);
+    }
+    check(`unit ${id} sale purchase`, wonText(e.purchase), d.sale.purchase);
+    for (const p of e.avg) check(`unit ${id} avg-${p.months}`, p.count ? `${wonText(p.average)} (${p.count}건)` : '거래 없음', d.sale[`avg-${p.months}`]);
+    // 비교 3가지
+    if (e.cmp) {
+      const exp = domComparisons(e.cmp, e.asset);
+      for (const k of ['sameFloor', 'sameComplex', 'neighborhood']) {
+        for (const f of ['cond', 'count', 'median', 'complexes']) if (f in exp[k]) check(`unit ${id} ${k}.${f}`, exp[k][f], d.comparisons[k][f]);
+        check(`unit ${id} ${k}.rows`, JSON.stringify(exp[k].rows), JSON.stringify(d.comparisons[k].rows));
+      }
+    }
+    // 내 건물
+    const m = e.metrics;
+    if (m) {
+      check(`unit ${id} my avg-rent`, wonText(m.averageMonthlyRent), d.myBuilding['avg-rent']);
+      check(`unit ${id} my avg-deposit`, wonText(m.averageDeposit), d.myBuilding['avg-deposit']);
+      check(`unit ${id} my avg-area`, `${m.averageAreaSqm.toFixed(1)}㎡`, d.myBuilding['avg-area']);
+      if (m.averageConverted != null) check(`unit ${id} my avg-converted`, wonText(m.averageConverted), d.myBuilding['avg-converted']);
+      if (m.convertedPerSqm != null) check(`unit ${id} my per-sqm`, `${String(m.convertedPerSqm).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}원`, d.myBuilding['per-sqm']);
+    }
+    // 주변 전월세
+    const n = e.nearby;
+    if (n?.enough) {
+      check(`unit ${id} nearby avg`, wonText(n.average), d.nearby.avg);
+      check(`unit ${id} nearby range`, `${wonText(n.min)} ~ ${wonText(n.max)}`, d.nearby.range);
+      check(`unit ${id} nearby count`, `최근 ${n.months}개월 ${n.count}건`, d.nearby.count);
+    }
   }
 }
 

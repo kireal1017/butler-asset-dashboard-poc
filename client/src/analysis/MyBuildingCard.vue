@@ -11,18 +11,17 @@ const props = defineProps({
   leaseLink: { type: [String, Object], required: true },
 });
 const m = computed(() => props.myBuilding.metrics);
-const won = (v) => formatWon(v);
 </script>
 
 <template>
   <Card title="내 건물" data-testid="card-my-building">
     <template v-if="m">
       <dl class="rows">
-        <InfoRow label="평균 월세" :value="won(m.averageMonthlyRent)" data-v="avg-rent" />
-        <InfoRow v-if="m.averageConverted !== null" label="환산 월세" :value="won(m.averageConverted)" emphasize data-v="avg-converted" />
-        <InfoRow label="평균 보증금" :value="won(m.averageDeposit)" data-v="avg-deposit" />
-        <InfoRow label="평균 면적" :value="`${m.averageAreaSqm.toFixed(1)}㎡`" data-v="avg-area" />
-        <InfoRow v-if="m.convertedPerSqm !== null" label="㎡당 환산 월세" :value="`${m.convertedPerSqm.toLocaleString('en-US')}원`" data-v="per-sqm" />
+        <InfoRow label="평균 월세"><span data-v="avg-rent">{{ formatWon(m.averageMonthlyRent) }}</span></InfoRow>
+        <InfoRow v-if="m.averageConverted !== null" label="환산 월세" emphasize><span data-v="avg-converted">{{ formatWon(m.averageConverted) }}</span></InfoRow>
+        <InfoRow label="평균 보증금"><span data-v="avg-deposit">{{ formatWon(m.averageDeposit) }}</span></InfoRow>
+        <InfoRow label="평균 면적"><span data-v="avg-area">{{ `${m.averageAreaSqm.toFixed(1)}㎡` }}</span></InfoRow>
+        <InfoRow v-if="m.convertedPerSqm !== null" label="㎡당 환산 월세"><span data-v="per-sqm">{{ `${m.convertedPerSqm.toLocaleString('en-US')}원` }}</span></InfoRow>
       </dl>
       <p class="note">계약에 등록한 값이에요.</p>
       <p v-if="conversion" class="note">보증금은 <strong>{{ rateLabel(conversion) }}</strong>로 월세로 바꿔 더했어요 — 보증금을 빼고 월세만 보면 실제보다 낮아 보여요.</p>

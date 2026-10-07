@@ -17,7 +17,7 @@ const verdictText = computed(() => {
 </script>
 
 <template>
-  <Card title="주변 전월세 시세" data-testid="card-nearby-rent">
+  <Card title="주변 전월세 시세" data-testid="card-nearby-rent" :data-unit="n.unitId">
     <p v-if="n.status === 'missing' || n.status === 'collecting'" class="muted" role="status" data-v="loading">
       전월세 실거래를 불러오는 중이에요<template v-if="n.progress?.total"> ({{ n.progress.total }}개월 중 {{ n.progress.done }}개월)</template>
     </p>
@@ -28,9 +28,9 @@ const verdictText = computed(() => {
     <p v-else-if="n.rateMissing" class="muted" data-v="rate-missing">{{ RATE_MISSING }}</p>
     <template v-else-if="n.enough">
       <dl class="rows">
-        <InfoRow label="주변 평균 환산 월세" :value="formatWon(n.average)" emphasize data-v="avg" />
-        <InfoRow label="범위" :value="`${formatWon(n.min)} ~ ${formatWon(n.max)}`" data-v="range" />
-        <InfoRow label="거래" :value="`최근 ${n.months}개월 ${n.count}건`" data-v="count" />
+        <InfoRow label="주변 평균 환산 월세" emphasize><span data-v="avg">{{ formatWon(n.average) }}</span></InfoRow>
+        <InfoRow label="범위"><span data-v="range">{{ `${formatWon(n.min)} ~ ${formatWon(n.max)}` }}</span></InfoRow>
+        <InfoRow label="거래"><span data-v="count">{{ `최근 ${n.months}개월 ${n.count}건` }}</span></InfoRow>
       </dl>
       <p v-if="verdictText" class="verdict" data-v="verdict">{{ verdictText }}</p>
     </template>

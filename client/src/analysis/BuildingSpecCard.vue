@@ -30,7 +30,7 @@ const rows = computed(() => {
 <template>
   <Card title="건축물대장" data-testid="card-building-spec">
     <dl v-if="spec.status === 'ready' && rows.length" class="rows">
-      <InfoRow v-for="[label, value] in rows" :key="label" :label="label" :value="value" :data-v="`spec-${label}`" />
+      <InfoRow v-for="[label, value] in rows" :key="label" :label="label"><span :data-v="`spec-${label}`">{{ value }}</span></InfoRow>
     </dl>
     <div v-else-if="spec.status === 'failed' || (spec.status === 'ready' && !rows.length)" class="stack" role="alert">
       <p class="muted">건축물대장 정보를 불러오지 못했어요.</p>

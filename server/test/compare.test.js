@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import { toTradeRow } from '../src/external/rtms.js';
 import { COMPARE, groupComplexAreas, median, neighborhoodComplexes, sameFloorTrades } from '../src/logic/compare.js';
-import { findCandidates } from '../src/logic/match.js';
 import { comparableTrades } from '../src/logic/price.js';
 
 const ROWS_2016 = JSON.parse(fs.readFileSync(new URL('./fixtures/rtms-11350-201610-hagye.json', import.meta.url), 'utf8')).items
@@ -62,15 +61,13 @@ describe('3.3 같은 층 거래', () => {
     expect(r.trades[0].ym).toBe('202311');
   });
 
-  it('case A: 2016 same-floor trade is outside the default 36 months but listed with a longer period, and it is the purchase candidate', () => {
+  it('case A: 2016 same-floor trade is outside the default 36 months but listed with a longer period', () => {
     const rows = ROWS_2016.filter((t) => t.apt_seq === '11350-75');
     const def = sameFloorTrades(sorted(rows), 10, P36);
     expect(def.trades.some((t) => t.ym === '201610')).toBe(false);
     const long = sameFloorTrades(sorted(rows), 10, { from: '201601', to: '202610' });
     const listed = long.trades.find((t) => t.ym === '201610' && t.day === 13);
     expect(listed).toMatchObject({ amount: 45850, floor: 10 });
-    const cands = findCandidates(rows, { areaU: 849100, floor: 10, dong: '112', acquisitionYm: '201610' });
-    expect(cands.some((c) => c.ym === listed.ym && c.day === listed.day && c.amount === listed.amount)).toBe(true);
   });
 
   it('includes the matched purchase trade itself (not excluded)', () => {

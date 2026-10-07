@@ -58,7 +58,8 @@ function onKey(e, i) {
 }
 .seg__btn {
   min-width: 0;
-  min-height: 40px; /* 바깥 테두리·여백 포함 44px */
+  position: relative;
+  min-height: 40px; /* 보이는 높이. 누름 영역은 ::after로 44px */
   margin: 0;
   padding: 0 var(--space-2);
   border: 1px solid transparent;
@@ -82,4 +83,5 @@ function onKey(e, i) {
   box-shadow: var(--shadow-sm);
 }
 .seg__btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.seg__btn::after { content: ''; position: absolute; inset: -3px 0; }
 </style>

@@ -19,7 +19,7 @@ const label = computed(() => `${props.basis ? `${props.basis} ` : ''}${describeC
 <template>
   <span v-if="diff !== null" class="chg" :class="`chg--${dir}`">
     <span class="chg__sr">{{ label }}</span>
-    <span aria-hidden="true">{{ text }}</span><span v-if="basis" class="chg__basis" aria-hidden="true"> {{ basis }}</span>
+    <span aria-hidden="true">{{ text }}</span><span v-if="basis" class="chg__basis" aria-hidden="true">{{ basis }}</span>
   </span>
 </template>
 
@@ -38,5 +38,5 @@ const label = computed(() => `${props.basis ? `${props.basis} ` : ''}${describeC
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
-.chg__basis { color: var(--text-secondary); font-weight: var(--fw-regular); }
+.chg__basis { margin-left: var(--space-1); color: var(--text-secondary); font-weight: var(--fw-regular); }
 </style>

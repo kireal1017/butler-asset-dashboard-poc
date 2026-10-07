@@ -9,6 +9,7 @@
     "test": "npm test -w server && npm test -w client",
     "m0": "node scripts/m0-probe.mjs",
     "verify": "node verify/check-imports.mjs && node verify/recompute.mjs",
+    "e2e": "node verify/e2e-v3.mjs && node verify/recompute.mjs --dom verify/out/dom.json",
     "scan-secrets": "node verify/scan-secrets.mjs"
   },
   "devDependencies": {

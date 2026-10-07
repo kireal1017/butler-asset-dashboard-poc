@@ -18,7 +18,6 @@ export const router = createRouter({
     { path: '/leases', name: 'leases', component: () => import('./views/Leases.vue') },
     { path: '/leases/new', name: 'lease-new', component: () => import('./views/LeaseForm.vue') },
     { path: '/leases/:id(\\d+)/edit', name: 'lease-edit', component: () => import('./views/LeaseForm.vue') },
-    { path: '/__swatch', component: () => import('./views/Swatch.vue') },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
   scrollBehavior: (to, from, saved) => saved ?? (to.path === from.path ? false : { top: 0 }),
