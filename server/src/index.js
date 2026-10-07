@@ -4,6 +4,8 @@ import { createApiClient } from './external/http.js';
 import { countComplexes, loadSeoulComplexes } from './services/complexes.js';
 import { createApp } from './app.js';
 import { createCollector } from './collect/collector.js';
+import { createRentStore } from './collect/rentStore.js';
+import { fetchRentMonth } from './external/rent.js';
 import { kstYm } from './logic/months.js';
 
 const config = loadConfig();
@@ -15,8 +17,12 @@ if (!config.serviceKey) {
 const db = openDb(config.dbPath);
 const api = createApiClient({ db, serviceKey: config.serviceKey, devFault: config.devFault });
 const collector = createCollector({ db, api });
+// v3 전월세: 매매와 같은 큐 규칙, 전용 테이블
+const rentCollector = createCollector({ db, api, fetchMonth: fetchRentMonth, store: createRentStore(db) });
 const kstDate = (d) => new Date(d.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);
-const ctx = { db, api, collector, config, asOf: () => config.asOf ?? kstYm(new Date()), today: () => config.today ?? kstDate(new Date()) };
+const ctx = {
+  db, api, collector, rentCollector, config, asOf: () => config.asOf ?? kstYm(new Date()), today: () => config.today ?? kstDate(new Date()),
+};
 
 if (countComplexes(db) === 0) {
   try {

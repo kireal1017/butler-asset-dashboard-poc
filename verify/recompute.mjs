@@ -466,6 +466,105 @@ for (const b of list.items) {
   }
 }
 
+// ---------- v3 2단계: 계약·호실·건물 상태 (명세 7.1, 7.2, 기준 날짜 TODAY) ----------
+const TODAY = envValue('TODAY') || health.today;
+const dayNo = (s) => Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10)) / 86400000;
+function expUnitStatus(leases) {
+  const on = leases.find((l) => l.start_date <= TODAY && TODAY <= l.end_date);
+  if (on) return dayNo(on.end_date) - dayNo(TODAY) <= 120 ? 'EXPIRING' : 'LEASED';
+  return leases.some((l) => l.start_date > TODAY) ? 'MOVE_IN' : 'VACANT';
+}
+summary.statusChecked = 0;
+for (const b of list.items) {
+  const bRow = db.prepare('SELECT * FROM buildings WHERE id = ?').get(b.id);
+  const units = db.prepare('SELECT id FROM units WHERE building_id = ?').all(b.id);
+  const st = units.map((u) => expUnitStatus(db.prepare('SELECT * FROM leases WHERE unit_id = ?').all(u.id)));
+  const expStatus = !st.length ? 'REGISTERING' : st.includes('EXPIRING') ? 'CHECK' : 'OPERATING';
+  const leasedN = st.filter((s) => s === 'LEASED' || s === 'EXPIRING').length;
+  const exp = { status: expStatus, occupancy: { leased: leasedN, owned: bRow.owned_unit_count, rate: leasedN / bRow.owned_unit_count } };
+  summary.statusChecked++;
+  if (!same(exp, { status: b.status, occupancy: b.occupancy })) fail(`building ${b.id} status`, `expected ${JSON.stringify(exp)} got ${JSON.stringify({ status: b.status, occupancy: b.occupancy })}`);
+  const detail = (await get(`/api/buildings/${b.id}`)).body;
+  for (const u of detail.units) {
+    const e = expUnitStatus(db.prepare('SELECT * FROM leases WHERE unit_id = ?').all(u.id));
+    summary.statusChecked++;
+    if (u.leaseStatus !== e) fail(`unit ${u.id} leaseStatus`, `expected ${e} got ${u.leaseStatus}`);
+  }
+}
+
+// ---------- v3 3단계: 전월세 원본 대조, 환산 월세, 내 건물, 주변 전월세 (명세 7.5, 7.6) ----------
+const rentLogs = db.prepare('SELECT * FROM rent_fetch_log').all();
+summary.rentMonths = rentLogs.length;
+summary.rentRowsChecked = 0;
+const rentByMonth = new Map();
+for (const log of rentLogs) {
+  const pages = db.prepare('SELECT body FROM rent_raw_responses WHERE sgg_cd = ? AND deal_ym = ? ORDER BY page').all(log.sgg_cd, log.deal_ym);
+  const parsed = [];
+  for (const p of pages) {
+    for (const b of itemsOf(p.body)) {
+      parsed.push({
+        aptSeq: tagValue(b, 'aptSeq'), area: areaUnits(tagValue(b, 'excluUseAr')), ym: log.deal_ym,
+        deposit: manwon(tagValue(b, 'deposit') || '0') * 10000, monthly: manwon(tagValue(b, 'monthlyRent') || '0') * 10000,
+      });
+    }
+  }
+  rentByMonth.set(`${log.sgg_cd}|${log.deal_ym}`, parsed);
+  const rows = db.prepare('SELECT * FROM rent_transactions WHERE sgg_cd = ? AND deal_ym = ? ORDER BY src_seq').all(log.sgg_cd, log.deal_ym);
+  if (rows.length !== parsed.length || rows.length !== log.total_count) fail(`rent ${log.sgg_cd}/${log.deal_ym}`, `raw ${parsed.length} db ${rows.length} total ${log.total_count}`);
+  rows.forEach((r, i) => {
+    summary.rentRowsChecked++;
+    const p = parsed[i];
+    if (!p || (p.aptSeq || null) !== r.apt_seq || p.area !== r.area_u || p.deposit !== r.deposit || p.monthly !== r.monthly_rent) {
+      fail(`rent ${log.sgg_cd}/${log.deal_ym} row ${i}`, `raw ${JSON.stringify(p)} db ${JSON.stringify({ apt: r.apt_seq, area: r.area_u, dep: r.deposit, mon: r.monthly_rent })}`);
+    }
+  });
+}
+const conv = (dep, mon, rate) => Math.round(mon + (dep * rate) / 100 / 12);
+summary.analysisChecked = 0;
+for (const b of list.items) {
+  const a = (await get(`/api/buildings/${b.id}/analysis`)).body;
+  const rate = a.conversion?.rate;
+  const bRow = db.prepare('SELECT b.*, c.sigungu_code, c.bjd_code, c.bonbun, c.bubun FROM buildings b JOIN complexes c USING (kapt_code) WHERE b.id = ?').get(b.id);
+  const units = db.prepare('SELECT * FROM units WHERE building_id = ? ORDER BY id').all(b.id);
+  const leased = units.map((u) => ({ u, l: db.prepare('SELECT * FROM leases WHERE unit_id = ?').all(u.id).find((l) => l.start_date <= TODAY && TODAY <= l.end_date) })).filter((x) => x.l);
+  let expMetrics = null;
+  if (leased.length) {
+    const c = leased.map(({ l }) => conv(l.deposit, l.monthly_rent, rate));
+    const sqm = leased.map(({ u }) => u.area_u / 10000);
+    const avg = (xs) => xs.reduce((s, x) => s + x, 0) / xs.length;
+    expMetrics = {
+      count: leased.length, averageMonthlyRent: Math.round(avg(leased.map((x) => x.l.monthly_rent))), averageDeposit: Math.round(avg(leased.map((x) => x.l.deposit))),
+      averageConverted: Number.isFinite(rate) ? Math.round(avg(c)) : null, averageAreaSqm: Math.round(avg(sqm) * 10) / 10,
+      convertedPerSqm: Number.isFinite(rate) ? Math.round(c.reduce((s, x) => s + x, 0) / sqm.reduce((s, x) => s + x, 0)) : null,
+    };
+  }
+  summary.analysisChecked++;
+  if (!same({ leasedUnits: leased.length, metrics: expMetrics }, a.myBuilding)) fail(`building ${b.id} myBuilding`, `expected ${JSON.stringify({ leasedUnits: leased.length, metrics: expMetrics })} got ${JSON.stringify(a.myBuilding)}`);
+
+  // 주변 전월세: 같은 단지(지번 연결 집합)·±5㎡·6→12개월·3건
+  for (const u of units) {
+    const n = (await get(`/api/buildings/${b.id}/analysis?unit=${u.id}`)).body.nearby;
+    if (!n || n.status !== 'ready') continue;
+    const link = lotSeqs({ ...bRow });
+    const all = [];
+    for (const [k, list2] of rentByMonth) if (k.startsWith(`${bRow.sigungu_code}|`)) for (const r of list2) if (link.has(r.aptSeq) && Math.abs(r.area - u.area_u) <= 50000) all.push(r);
+    let exp = null;
+    for (const m of [6, 12]) {
+      const from = addMonthsYm(AS_OF, -(m - 1));
+      const l = all.filter((r) => r.ym >= from && r.ym <= AS_OF);
+      if (l.length >= 3) {
+        const c = l.map((r) => conv(r.deposit, r.monthly, rate));
+        exp = { enough: true, months: m, count: c.length, average: Math.round(c.reduce((s, x) => s + x, 0) / c.length), min: Math.min(...c), max: Math.max(...c) };
+        break;
+      }
+    }
+    if (!exp) exp = { enough: false, count12: all.filter((r) => r.ym >= addMonthsYm(AS_OF, -11) && r.ym <= AS_OF).length };
+    const got = exp.enough ? { enough: n.enough, months: n.months, count: n.count, average: n.average, min: n.min, max: n.max } : { enough: n.enough, count12: n.count12 };
+    summary.analysisChecked++;
+    if (!same(exp, got)) fail(`unit ${u.id} nearby`, `expected ${JSON.stringify(exp)} got ${JSON.stringify(got)}`);
+  }
+}
+
 const result = {
   db: DB_PATH,
   asOf: health.asOf,

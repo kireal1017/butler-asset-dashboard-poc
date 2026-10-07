@@ -5,6 +5,7 @@ import { lastMonths } from '../logic/months.js';
 import { REFERENCE_MONTHS } from '../logic/value.js';
 import { ensureDetail } from './complexDetail.js';
 import { recentJob } from './comparisons.js';
+import { collectRent, conversionRate, ensureBuildingSpec, ensureConversionRate, leaseConverted } from './analysis.js';
 import { unitLeaseState } from './leases.js';
 import { cleanDong, cleanHo, lookupForSave, resolveUnitInput } from './unitLookup.js';
 import { recordReference, subjectOf, unitRow, unitSummary } from './unitValue.js';
@@ -103,7 +104,13 @@ export async function createBuilding(ctx, body) {
   await ensureDetail(db, ctx.api, kaptCode).catch((e) => console.warn(`[building] detail ${kaptCode}: ${e.message}`));
   const info = db.prepare('INSERT INTO buildings (kapt_code, name, owned_unit_count, description, created_at) VALUES (?, ?, ?, ?, ?)')
     .run(kaptCode, name, owned, String(body.description ?? '').trim() || null, now());
-  return buildingView(ctx, buildingRow(db, Number(info.lastInsertRowid)));
+  const id = Number(info.lastInsertRowid);
+  // 건축물대장(8.3)은 등록 직후 받아 둔다. 실패해도 건물 등록은 끝낸다(카드에서 '다시 시도').
+  ensureBuildingSpec(ctx, id).catch((e) => {
+    db.prepare('UPDATE buildings SET building_spec_fetched_at = ? WHERE id = ? AND building_spec IS NULL').run(now(), id);
+    console.warn(`[spec] building ${id}: ${e.message}`);
+  });
+  return buildingView(ctx, buildingRow(db, id));
 }
 
 /** PUT /api/buildings/:id — 이름·보유 호실 수·메모. 보유 호실 수는 등록한 호실 수보다 작게 할 수 없다 */
@@ -128,13 +135,17 @@ export function deleteBuilding(ctx, id) {
   ctx.db.prepare('DELETE FROM buildings WHERE id = ?').run(id);
 }
 
-/** 호실 등록 직후: 최근 12개월 중 없는 달을 받고 첫 참고가를 기록한다 (4.5 등록하면 3) */
+/**
+ * 호실 등록 직후 (4.5 등록하면 3): 매매 최근 12개월 중 없는 달 → 첫 참고가 기록 → 전월세 수집·전환율.
+ * 전월세·전환율이 실패해도 등록 결과에는 영향이 없다.
+ */
 export function startUnitCollection(ctx, unitId) {
   const u = unitRow(ctx.db, unitId);
   const sgg = complexOf(ctx.db, u.kapt_code).sigungu_code;
   return ctx.collector.ensure(sgg, lastMonths(ctx.asOf(), REFERENCE_MONTHS), { jobId: recentJob(unitId) })
     .then(() => recordReference(ctx, unitId))
-    .catch((e) => console.warn(`[collect] unit ${unitId}: ${e.message}`));
+    .catch((e) => console.warn(`[collect] unit ${unitId}: ${e.message}`))
+    .then(() => (ctx.rentCollector ? Promise.allSettled([collectRent(ctx, sgg), ensureConversionRate(ctx)]) : null));
 }
 
 const PRICE_MAX = 1e13;
@@ -176,7 +187,11 @@ export async function createUnit(ctx, buildingId, body) {
 
 export function getUnit(ctx, id) {
   const u = unitRow(ctx.db, id);
-  return { asOf: ctx.asOf(), unit: unitView(ctx, u), building: buildingView(ctx, buildingRow(ctx.db, u.building_id)) };
+  const unit = unitView(ctx, u);
+  // 호실 상세 '임대 현황'의 환산 월세 (3단계): 전환율이 없으면 null → 화면은 행을 숨기고 안내
+  const conversion = conversionRate(ctx.db);
+  if (unit.lease) unit.lease.converted = leaseConverted(unit.lease, conversion);
+  return { asOf: ctx.asOf(), unit, building: buildingView(ctx, buildingRow(ctx.db, u.building_id)), conversion };
 }
 
 /** PUT /api/units/:id — 동·호·면적·층은 바꾸지 않고 취득 연월과 매입가만 (4.5 호실 수정) */

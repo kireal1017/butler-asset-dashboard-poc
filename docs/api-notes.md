@@ -151,3 +151,25 @@
 - 조회: `SttsApiTblData.do?STATBL_ID=A_2024_00156&DTACYCLE_CD=MM&CLS_ID=500006&START_WRTTIME=YYYYMM&END_WRTTIME=YYYYMM` → 서울 행만 온다.
 - 최근 값: **2026-07 4.74%**(2026-06 4.74, 2026-05 4.73). 기준 월 2026-10 대비 약 3개월 늦게 공표된다 → 화면 주석 "서울, 기준 2026.07".
 - `.env`에 수동 대체값(`RENT_CONVERSION_RATE`)은 없다. R-ONE 실패 시 v3 7.5 문구로 환산 행을 숨긴다.
+
+## 9. v3 서버 API (2026-10-08)
+
+v2의 `/api/assets*`(자산 = 호실 한 건)는 없앴다. DB는 시작할 때 `user_version` 3으로 바뀌며, 기존 자산 데이터는 같은 폴더의 `app-v2-backup-YYYYMMDD-HHMMSS.db`로 백업된다(실거래 캐시는 유지).
+
+| 경로 | 동작 |
+|---|---|
+| `GET /api/buildings[?refresh=1]` | 건물 목록·요약(운영 중/등록 중/확인 필요), 건물별 상태·입주율·호실 통계. `refresh=1`이면 최근 12개월 중 30일 지난 달 재수집 |
+| `POST /api/buildings` | 건물 등록(단지 코드·건물명 필수, 같은 단지 409). 등록 직후 건축물대장 표제부·총괄표제부를 받아 둔다(실패해도 등록 유지) |
+| `GET·PUT·DELETE /api/buildings/:id` | 상세(호실 카드 포함)·수정(보유 호실 수 ≥ 등록 호실 수)·삭제(호실 있으면 409) |
+| `POST /api/buildings/:id/units` | 호실 등록(동·호·취득 연월·매입가 필수, 중복 409, 보유 수 도달 409). 저장된 동·호 조회 결과를 재사용하고, 백그라운드로 매매 12개월 → 첫 참고가 기록 → 전월세 12개월·전환율 |
+| `GET·PUT·DELETE /api/units/:id` | 호실 상세(임대 상태·환산 월세 포함)·수정(취득 연월·매입가만)·삭제(계약·참고가 기록 함께) |
+| `GET /api/units/:id/value` | 매매 시세: 저장된 참고가(기준일·건수), 매입가 대비, 1·3·6개월 평균, 12개월 범위, 위치 막대 배치, 최근 5건 |
+| `POST /api/units/:id/value/refresh` | 최근 12개월 강제 재수집 후 참고가 기록(근거 거래가 같으면 줄 추가 없음). 끝난 뒤 1분 안 재요청은 429 |
+| `GET /api/units/:id/comparisons`, `POST …/collect` | 비교 3가지(v2와 같은 계산). GET은 읽기만 |
+| `POST /api/purchase-suggestion` | 취득 연월 1→3→6개월 같은 단지·같은 면적 평균(필요한 달만 수집) |
+| `GET·POST /api/leases`, `GET·PUT·DELETE /api/leases/:id` | 계약 목록(정렬)·등록·수정·삭제. 필수·종료일·겹침 검증 |
+| `GET /api/buildings/:id/analysis[?unit=]` | 내 건물 지표, 선택 호실의 주변 전월세, 건축물대장, 전환율. GET은 읽기만 |
+| `POST /api/buildings/:id/analysis/collect`, `POST /api/buildings/:id/spec/refresh` | 전월세·전환율·대장 중 필요한 것만 받기 / 대장 다시 시도 |
+
+기준 시점: 시세 기간은 `AS_OF`(기준 월), 계약 상태(D-n, 120일)는 `TODAY`(YYYY-MM-DD). 둘 다 없으면 한국 시간 이번 달·오늘.
+호출량(8.5): 호실 1개 등록 시 매매 최대 12회(이미 받은 달 제외) + 전월세 최대 12회 + 매입가 제안 최대 6회, 건물 등록 시 대장 2회, 전환율은 한 달에 1회.

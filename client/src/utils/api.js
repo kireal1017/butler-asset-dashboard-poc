@@ -16,12 +16,12 @@ export async function api(path, { method = 'GET', body } = {}) {
       body: body ? JSON.stringify(body) : undefined,
     });
   } catch {
-    throw new ApiError(0, 'NETWORK', '서버에 연결하지 못했습니다. 서버가 켜져 있는지 확인해 주세요.');
+    throw new ApiError(0, 'NETWORK', '서버에 연결하지 못했어요. 서버가 켜져 있는지 확인해 주세요.');
   }
   if (res.status === 204) return null;
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new ApiError(res.status, data.error?.code ?? 'UNKNOWN', data.error?.message ?? '요청을 처리하지 못했습니다. 다시 시도해 주세요.');
+    throw new ApiError(res.status, data.error?.code ?? 'UNKNOWN', data.error?.message ?? '요청을 처리하지 못했어요. 다시 시도해 주세요.');
   }
   return data;
 }

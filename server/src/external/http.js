@@ -1,9 +1,9 @@
 import { maskKey } from '../config.js';
 
 // 개발계정 일일 트래픽 (PRD 5장). 90%에 도달하면 추가 호출을 멈춘다.
-export const DAILY_LIMITS = { rtms: 10000, bldRgst: 10000, aptList: 5000, aptBasis: 5000 };
+export const DAILY_LIMITS = { rtms: 10000, rent: 10000, bldRgst: 10000, aptList: 5000, aptBasis: 5000 };
 export const STOP_RATIO = 0.9;
-const LABELS = { rtms: '실거래가', bldRgst: '건축물대장', aptList: '단지 목록', aptBasis: '단지 정보' };
+const LABELS = { rtms: '실거래가', rent: '전월세 실거래가', bldRgst: '건축물대장', aptList: '단지 목록', aptBasis: '단지 정보' };
 const RETRY_DELAYS_MS = [1000, 3000];
 
 export class QuotaError extends Error {

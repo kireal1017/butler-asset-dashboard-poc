@@ -4,13 +4,12 @@ import { createMonthStore } from './store.js';
 const STALE_MS = 30 * 24 * 3600 * 1000;
 
 /**
- * 실거래 수집기.
+ * 실거래 수집기. (v3: 전월세도 같은 큐 규칙을 쓰도록 fetchMonth·store를 주입할 수 있다)
  * - 외부 호출은 단일 큐에서 순차로 처리한다 (PRD 5.5).
  * - 큐 키는 (sgg_cd, deal_ym). 대기·실행 중인 달은 다시 넣지 않고 같은 Promise를 돌려준다.
  * - 진행률은 요청 묶음(job)마다 "n개월 중 m개월"로 기록한다.
  */
-export function createCollector({ db, api, now = () => new Date() }) {
-  const store = createMonthStore(db);
+export function createCollector({ db, api, now = () => new Date(), fetchMonth = fetchTradeMonth, store = createMonthStore(db) }) {
   const inflight = new Map(); // `${sgg}|${ym}` -> Promise
   const jobs = new Map(); // jobId -> { total, done, failed, error, running }
   let chain = Promise.resolve();
@@ -30,7 +29,7 @@ export function createCollector({ db, api, now = () => new Date() }) {
     const k = key(sgg, ym);
     if (inflight.has(k)) return inflight.get(k);
     const p = (chain = chain.catch(() => {}).then(async () => {
-      const month = await fetchTradeMonth(api, sgg, ym);
+      const month = await fetchMonth(api, sgg, ym);
       store.replaceMonth(sgg, ym, month, now().toISOString());
     })).finally(() => inflight.delete(k));
     inflight.set(k, p);

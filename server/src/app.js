@@ -9,6 +9,7 @@ import {
 } from './services/buildings.js';
 import { refreshUnitValue, subjectOf, suggestPurchase, unitRow, unitValue } from './services/unitValue.js';
 import { createLease, deleteLease, getLease, listLeases, updateLease } from './services/leases.js';
+import { buildingAnalysis, collectAnalysis, ensureBuildingSpec } from './services/analysis.js';
 
 const EXTERNAL_CODES = new Set(['QUOTA', 'KEY_NOT_REGISTERED', 'EXTERNAL']);
 
@@ -86,6 +87,17 @@ export function createApp(ctx) {
   // 매입가 제안: 취득 시점 최대 6개월을 수집할 수 있으므로 POST
   app.post('/api/purchase-suggestion', wrap(async (req, res) => {
     res.json(await suggestPurchase(ctx, req.body ?? {}));
+  }));
+
+  // ---- 자산 분석 카드 ①·②·④ (4.8) — GET은 읽기만, 외부 호출은 POST ----
+  app.get('/api/buildings/:id/analysis', (req, res) => res.json(buildingAnalysis(ctx, idOf(req), req.query.unit)));
+  app.post('/api/buildings/:id/analysis/collect', (req, res) => {
+    collectAnalysis(ctx, idOf(req));
+    res.status(202).json({ ok: true });
+  });
+  // 건축물대장 '다시 시도'
+  app.post('/api/buildings/:id/spec/refresh', wrap(async (req, res) => {
+    res.json({ spec: await ensureBuildingSpec(ctx, idOf(req), { force: true }) });
   }));
 
   // ---- 임대 계약 (4.9, 4.10) ----

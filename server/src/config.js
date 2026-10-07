@@ -37,6 +37,10 @@ export function loadConfig(overrides = {}) {
     dbPath: env('DB_PATH') || path.join(os.homedir(), '.butler-poc', 'app.db'),
     asOf,
     today,
+    // v3 전월세전환율: R-ONE 인증키, 실패 시 직접 입력 값(선택)
+    roneKey: env('RONE_API_KEY'),
+    manualRate: env('RENT_CONVERSION_RATE') ? Number(env('RENT_CONVERSION_RATE')) : null,
+    manualRateYm: env('RENT_CONVERSION_RATE_YM') || null,
     port: Number(env('API_PORT') || 3001),
     devFault,
     ...overrides,

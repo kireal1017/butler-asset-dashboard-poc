@@ -80,3 +80,28 @@ describe('formatChange (등락 표시 (c): 부호·화살표 중심)', () => {
     expect(describeChange(-15_000_000, -2.1)).toBe('하락 1,500만원, 2.1퍼센트');
   });
 });
+
+import { formatDate, formatYmDot, formatYmKo, formatYmSpanKo, formatAreaU, formatFloorKo, unitName } from './format.js';
+
+describe('v3 날짜·면적 표기', () => {
+  it('dates', () => {
+    expect(formatDate('2027-08-31')).toBe('2027.08.31');
+    expect(formatDate('20260722')).toBe('2026.07.22');
+    expect(formatDate(null)).toBe('');
+    expect(formatYmDot('201610')).toBe('2016.10');
+    expect(formatYmKo('201610')).toBe('2016년 10월');
+    expect(formatYmKo('201601')).toBe('2016년 1월');
+  });
+  it('month spans for purchase suggestion', () => {
+    expect(formatYmSpanKo('201610', '201610')).toBe('2016년 10월');
+    expect(formatYmSpanKo('201608', '201610')).toBe('2016년 8월~10월');
+    expect(formatYmSpanKo('201611', '201701')).toBe('2016년 11월~2017년 1월');
+  });
+  it('area, floor, unit name', () => {
+    expect(formatAreaU(849100)).toBe('84.91㎡');
+    expect(formatAreaU(590000)).toBe('59㎡');
+    expect(formatFloorKo(10)).toBe('10층');
+    expect(formatFloorKo(-1)).toBe('지하 1층');
+    expect(unitName({ dong: '112', ho: '1001' })).toBe('112동 1001호');
+  });
+});

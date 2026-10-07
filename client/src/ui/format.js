@@ -85,3 +85,46 @@ export function describeChange(diffWon, rate) {
   if (dir === 'flat') return `변동 없음${r}`;
   return `${dir === 'up' ? '상승' : '하락'} ${formatWon(Math.abs(toInt(diffWon)))}${r}`;
 }
+
+// ---- 날짜·면적·층 표기 (v3 화면 공통) ----
+
+/** '2027-08-31' 또는 '20270831' → 2027.08.31 */
+export function formatDate(d) {
+  if (!d) return '';
+  const s = String(d).replace(/-/g, '');
+  if (!/^\d{8}$/.test(s)) return '';
+  return `${s.slice(0, 4)}.${s.slice(4, 6)}.${s.slice(6, 8)}`;
+}
+
+/** '201610' → 2016.10 */
+export function formatYmDot(ym) {
+  if (!/^\d{6}$/.test(String(ym ?? ''))) return '';
+  return `${ym.slice(0, 4)}.${ym.slice(4, 6)}`;
+}
+
+/** '201610' → 2016년 10월 */
+export function formatYmKo(ym) {
+  if (!/^\d{6}$/.test(String(ym ?? ''))) return '';
+  return `${ym.slice(0, 4)}년 ${Number(ym.slice(4, 6))}월`;
+}
+
+/** 기간 '201608'~'201610' → 2016년 8월~10월 / 2016년 11월~2017년 1월 / 같으면 2016년 10월 */
+export function formatYmSpanKo(from, to) {
+  if (!from || from === to) return formatYmKo(to);
+  if (from.slice(0, 4) === to.slice(0, 4)) return `${formatYmKo(from)}~${Number(to.slice(4, 6))}월`;
+  return `${formatYmKo(from)}~${formatYmKo(to)}`;
+}
+
+/** 1/10000㎡ 정수 → 84.91㎡ (뒤의 0 생략) */
+export function formatAreaU(areaU) {
+  if (!Number.isFinite(areaU)) return '';
+  const whole = Math.floor(areaU / 10000);
+  const frac = String(areaU % 10000).padStart(4, '0').replace(/0+$/, '');
+  return `${whole}${frac ? `.${frac}` : ''}㎡`;
+}
+
+/** 10 → 10층, −1 → 지하 1층 */
+export const formatFloorKo = (f) => (Number.isFinite(f) ? (f < 0 ? `지하 ${-f}층` : `${f}층`) : '');
+
+/** 112, 1001 → 112동 1001호 */
+export const unitName = (u) => (u ? `${u.dong}동 ${u.ho}호` : '');

@@ -5,6 +5,8 @@ import { openDb } from '../src/db/index.js';
 import { createApp } from '../src/app.js';
 import { createCollector } from '../src/collect/collector.js';
 import { comparableTrades, currentPrice } from '../src/logic/price.js';
+import { createRentStore } from '../src/collect/rentStore.js';
+import { fetchRentMonth } from '../src/external/rent.js';
 
 const fixture = (f) => JSON.parse(fs.readFileSync(new URL(`./fixtures/${f}`, import.meta.url), 'utf8'));
 const RECENT = fixture('rtms-11350-recent-hagye.json').items; // 2025-10 ~ 2026-09 하계동 실제 거래
@@ -15,16 +17,27 @@ const xmlOf = (items) => `<response><header><resultCode>000</resultCode><resultM
 }</items><totalCount>${items.length}</totalCount></body></response>`;
 const ymOf = (t) => `${t.dealYear}${String(t.dealMonth).padStart(2, '0')}`;
 
-/** 실제 하계동 거래로 월별 응답을 돌려주는 가짜 실거래 API. 실거래 외의 호출은 실패시키고 호출을 기록한다. */
+const RENT = fixture('rent-11350-hagye.json').items; // 2026-07 ~ 09 하계현대우성 실제 전월세
+const TITLE = fixture('bldtitle-hagye270.json'); // 하계동 270번지 표제부·총괄표제부 실제 응답
+
+/**
+ * 실제 응답으로 답하는 가짜 공공데이터 API. 호출을 "API:달" 또는 "API:오퍼레이션"으로 기록한다.
+ * 매매·전월세는 월별 XML, 건축물대장은 표제부·총괄표제부 JSON. 그 밖의 호출은 실패시킨다.
+ */
 function fakeApi(source = [...RECENT, ...Y2016]) {
   const api = {
     calls: [],
     source,
+    rentSource: RENT,
     devFault: null,
     request: async (name, url, params) => {
-      api.calls.push(`${name}:${params.DEAL_YMD ?? ''}`);
-      if (name !== 'rtms') throw new Error(`unexpected ${name}`);
-      return xmlOf(api.source.filter((t) => ymOf(t) === params.DEAL_YMD));
+      const op = url.split('/').pop();
+      api.calls.push(`${name}:${params.DEAL_YMD ?? op}`);
+      if (name === 'rtms') return xmlOf(api.source.filter((t) => ymOf(t) === params.DEAL_YMD));
+      if (name === 'rent') return xmlOf(api.rentSource.filter((t) => ymOf(t) === params.DEAL_YMD));
+      if (name === 'bldRgst' && op === 'getBrTitleInfo') return JSON.stringify(TITLE.title);
+      if (name === 'bldRgst' && op === 'getBrRecapTitleInfo') return JSON.stringify(TITLE.recap);
+      throw new Error(`unexpected ${name} ${op}`);
     },
   };
   return api;
@@ -53,7 +66,16 @@ beforeEach(() => {
   seed(db);
   const api = fakeApi();
   asOf = '202609';
-  ctx = { db, api, collector: createCollector({ db, api }), asOf: () => asOf, today: () => '2026-09-30' };
+  ctx = {
+    db,
+    api,
+    collector: createCollector({ db, api }),
+    rentCollector: createCollector({ db, api, fetchMonth: fetchRentMonth, store: createRentStore(db) }),
+    config: {},
+    fetchConversionRate: async () => ({ ym: '202607', rate: 4.74 }), // R-ONE 실측 값(서울 아파트 2026-07)
+    asOf: () => asOf,
+    today: () => '2026-09-30',
+  };
 });
 
 const settle = () => new Promise((r) => setTimeout(r, 30));
@@ -80,7 +102,9 @@ describe('건물 (4.2, 4.3)', () => {
     expect(bad.body.error.message).toBe('건물명과 주소는 필수예요.');
     const list = (await request(app).get('/api/buildings').expect(200)).body;
     expect(list.items).toHaveLength(1);
-    expect(ctx.api.calls).toEqual([]); // 상세는 이미 저장되어 있어 외부 호출 없음
+    await settle();
+    // 단지 상세는 이미 저장되어 있어 다시 부르지 않고, 건축물대장 표제부·총괄표제부만 등록 직후 1번씩
+    expect(ctx.api.calls).toEqual(['bldRgst:getBrTitleInfo', 'bldRgst:getBrRecapTitleInfo']);
   });
 
   it('limits owned unit count to at least the registered units, and blocks deleting a building with units', async () => {
@@ -101,7 +125,7 @@ describe('호실 (4.5, 4.6)', () => {
     const b = await building(app);
     const u = await unit(app, b.id);
     expect(u).toMatchObject({ dong: '112', ho: '1001', areaU: 849100, floor: 10, areaSource: 'auto', acquisitionYm: '201610', purchasePrice: 430000000 });
-    expect(ctx.api.calls.filter((c) => !c.startsWith('rtms:'))).toEqual([]); // 대장 재조회 없음
+    expect(ctx.api.calls.filter((c) => c.includes('ExposPubuse'))).toEqual([]); // 저장된 조회 결과를 써서 전유부 재조회 없음
     expect(rtmsCalls()).toHaveLength(12);
     const refs = ctx.db.prepare('SELECT * FROM unit_value_references WHERE unit_id = ?').all(u.id);
     expect(refs).toHaveLength(1);
@@ -307,5 +331,58 @@ describe('임대 계약 (4.9, 4.10, 7.1, 7.2) — TODAY 2026-09-30', () => {
     await request(app).post('/api/leases').send(lease(u.id)).expect(201);
     await request(app).delete(`/api/units/${u.id}`).expect(204);
     expect(ctx.db.prepare('SELECT COUNT(*) n FROM leases').get().n).toBe(0);
+  });
+});
+
+describe('자산 분석 카드 ①·②·④ (4.8, 7.5, 7.6, 8.2~8.4)', () => {
+  it('registration collects 12 months of rent and the conversion rate; analysis combines my lease, nearby rent and the building register', async () => {
+    const app = createApp(ctx);
+    const b = await building(app);
+    const u = await unit(app, b.id);
+    await settle();
+    expect(ctx.api.calls.filter((c) => c.startsWith('rent:'))).toHaveLength(12);
+    expect(ctx.db.prepare('SELECT COUNT(*) n FROM rent_transactions').get().n).toBe(RENT.length);
+
+    let a = (await request(app).get(`/api/buildings/${b.id}/analysis`).expect(200)).body;
+    expect(a.conversion).toMatchObject({ region: '서울', ym: '202607', rate: 4.74, source: 'RONE' });
+    expect(a.myBuilding).toEqual({ leasedUnits: 0, metrics: null });
+    expect(a.spec).toMatchObject({ status: 'ready', data: { groundFloors: 15, households: 1320, parking: null } });
+    expect(a.nearby).toMatchObject({ unitId: u.id, status: 'ready' });
+
+    await request(app).post('/api/leases').send({ unitId: u.id, leaseType: 'MONTHLY', deposit: 50000000, monthlyRent: 800000, startDate: '2025-09-01', endDate: '2027-08-31' }).expect(201);
+    a = (await request(app).get(`/api/buildings/${b.id}/analysis?unit=${u.id}`).expect(200)).body;
+    // 환산 월세 = 800,000 + 50,000,000 × 4.74% ÷ 12 = 997,500
+    expect(a.myBuilding.metrics).toMatchObject({ count: 1, averageMonthlyRent: 800000, averageDeposit: 50000000, averageConverted: 997500, averageAreaSqm: 84.9 });
+    expect(a.myBuilding.metrics.convertedPerSqm).toBe(Math.round(997500 / 84.91));
+    expect(a.nearby.mine).toBe(997500);
+    expect(['SIMILAR', 'LOWER', 'HIGHER', undefined]).toContain(a.nearby.verdict);
+    const detail = (await request(app).get(`/api/units/${u.id}`)).body;
+    expect(detail.unit.lease.converted).toBe(997500);
+    expect(detail.conversion.rate).toBe(4.74);
+  });
+
+  it('GET analysis makes no external call; a failed building register shows failed and retry refetches', async () => {
+    const app = createApp(ctx);
+    ctx.api.request = (orig => async (name, url, params) => (name === 'bldRgst' ? Promise.reject(new Error('down')) : orig(name, url, params)))(ctx.api.request);
+    const b = await building(app);
+    await settle();
+    const before = ctx.api.calls.length;
+    const a = (await request(app).get(`/api/buildings/${b.id}/analysis`).expect(200)).body;
+    expect(a.spec.status).toBe('failed');
+    expect(a.nearby).toBeNull(); // 호실이 없으면 주변 전월세는 계산하지 않는다
+    expect(ctx.api.calls.length).toBe(before);
+    ctx.api.request = fakeApi().request;
+    const r = (await request(app).post(`/api/buildings/${b.id}/spec/refresh`).expect(200)).body;
+    expect(r.spec.groundFloors).toBe(15);
+  });
+
+  it('falls back to the manual rate when R-ONE fails, and hides conversion when neither exists', async () => {
+    ctx.fetchConversionRate = async () => { throw new Error('rone down'); };
+    ctx.config = { manualRate: 4.56, manualRateYm: '202606' };
+    const app = createApp(ctx);
+    const b = await building(app);
+    await unit(app, b.id);
+    await settle();
+    expect((await request(app).get(`/api/buildings/${b.id}/analysis`)).body.conversion).toMatchObject({ rate: 4.56, ym: '202606', source: 'MANUAL' });
   });
 });
